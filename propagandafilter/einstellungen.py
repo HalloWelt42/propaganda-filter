@@ -1,0 +1,129 @@
+"""Einstellungen des Filters: eine TOML-Datei im Datenordner, die der Mensch am Mac pflegt. Die Apps können sie nicht
+ändern. Geänderte Dateien gelten ab dem nächsten Auftrag; ist eine neue Fassung ungültig, gilt die letzte gültige
+weiter und der Fehler steht im Stand (GET /api/v1/stand)."""
+
+from __future__ import annotations
+
+import os
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+
+import tomli_w
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_serializer, field_validator, model_validator
+
+
+class _Modell(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class KellerwolkeEinstellungen(_Modell):
+    adresse: str = Field("https://wolke.pi5.lan", pattern=r"^https?://[^\s/]+(:\d+)?/?$")
+    zertifikatsstelle: Path | None = Field(
+        Path("~/Library/Application Support/mkcert/rootCA.pem"),
+        description="eigene Zertifikatsstelle für https (leerer Text: die des Systems)")
+    merken_s: float = Field(300.0, ge=0, le=3600, description="so lange gilt ein geprüfter App-Schlüssel")
+    zeitgrenze_s: float = Field(10.0, gt=0, le=120)
+
+    @field_validator("zertifikatsstelle", mode="before")
+    @classmethod
+    def _leer_ist_system(cls, wert: object) -> object:
+        return None if wert == "" else wert
+
+    @field_serializer("zertifikatsstelle")
+    def _system_ist_leer(self, wert: Path | None) -> str:
+        return "" if wert is None else str(wert)
+
+
+class Abruf(_Modell):
+    """Wie der Filter die zweite Fassung beim Anbieter holt."""
+
+    kennung: str = Field("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+                         description="User-Agent beim Abruf; Anbieter setzen Werbung oft je Gerät ein")
+    zeitgrenze_s: float = Field(600.0, gt=0, le=7200)
+
+
+class Grenzen(_Modell):
+    groesse_mb: int = Field(800, ge=1, le=10_000, description="größte Fassung, die angenommen oder geholt wird")
+    gleichzeitig: int = Field(1, ge=1, le=8, description="so viele Vergleiche rechnen zugleich, die übrigen warten")
+    auftraege_behalten_s: int = Field(3600, ge=60, le=7 * 86400, description="so lange bleibt ein fertiger Auftrag abrufbar")
+
+
+class Klang(_Modell):
+    """Schwellen des Vergleichs (das Verfahren selbst steht in klang.py)."""
+
+    gleich: float = Field(0.85, gt=0, lt=1, description="ab dieser Güte gilt ein Stück von 5 s als in der anderen Fassung gefunden")
+    stelle_mindestens_s: float = Field(3.0, ge=0.5, le=60, description="kürzere Abschnitte, die nur in einer Fassung vorkommen, zählen nicht")
+    gemeinsam_mindestens: float = Field(0.5, gt=0, le=1, description="so viel von A muss in B vorkommen, sonst sind es verschiedene Folgen")
+
+
+class Signaturen(_Modell):
+    """Was als Signatur (Ausschnitt einer eingesetzten Stelle) aufgehoben wird."""
+
+    aufheben: bool = True
+    dauer_mindestens_s: float = Field(3.0, ge=0.5, le=600)
+    dauer_hoechstens_s: float = Field(300.0, ge=1, le=3600, description="längere Stellen sind eher geänderte Inhalte als Werbung")
+
+
+class Einstellungen(_Modell):
+    erlaubte_apps: list[str] = Field(default_factory=lambda: ["radiohub"])
+    kellerwolke: KellerwolkeEinstellungen = Field(default_factory=KellerwolkeEinstellungen)
+    abruf: Abruf = Field(default_factory=Abruf)
+    grenzen: Grenzen = Field(default_factory=Grenzen)
+    klang: Klang = Field(default_factory=Klang)
+    signaturen: Signaturen = Field(default_factory=Signaturen)
+
+    @model_validator(mode="after")
+    def _pruefen(self) -> Einstellungen:
+        if not self.erlaubte_apps:
+            raise ValueError("Die Erlaubnisliste der Apps ist leer")
+        if self.signaturen.dauer_hoechstens_s <= self.signaturen.dauer_mindestens_s:
+            raise ValueError("signaturen: dauer_hoechstens_s muss größer als dauer_mindestens_s sein")
+        return self
+
+    def app_erlaubt(self, app: str) -> bool:
+        return app.casefold() in {a.casefold() for a in self.erlaubte_apps}
+
+
+class EinstellungsFehler(Exception):
+    pass
+
+
+@dataclass
+class _Geladen:
+    einstellungen: Einstellungen
+    stempel: int
+
+
+class Einstellungsquelle:
+    """Eine Wahrheit für die Einstellungen: die Datei. Gelesen wird neu, sobald sie sich geändert hat."""
+
+    def __init__(self, datei: Path) -> None:
+        self.datei = datei
+        self._geladen: _Geladen | None = None
+        self.fehler: str | None = None
+        if not datei.exists():
+            self.speichern(Einstellungen())
+        self.aktuell()
+
+    def aktuell(self) -> Einstellungen:
+        stempel = self.datei.stat().st_mtime_ns
+        if self._geladen is None or self._geladen.stempel != stempel:
+            try:
+                e = Einstellungen.model_validate(tomllib.loads(self.datei.read_text(encoding="utf-8")))
+                self._geladen = _Geladen(e, stempel)
+                self.fehler = None
+            except (ValidationError, tomllib.TOMLDecodeError, ValueError) as f:
+                self.fehler = f"{self.datei}: {f}"
+                if self._geladen is None:
+                    raise EinstellungsFehler(self.fehler) from f
+        assert self._geladen is not None
+        return self._geladen.einstellungen
+
+    def speichern(self, e: Einstellungen) -> None:
+        kopf = ("# Einstellungen des Propaganda-Filters. Gilt ab dem nächsten Auftrag; ungültige Änderungen werden\n"
+                "# übergangen (die letzte gültige Fassung gilt weiter, der Stand nennt den Fehler).\n\n")
+        neu = self.datei.with_suffix(".toml.neu")
+        neu.write_text(kopf + tomli_w.dumps(e.model_dump(mode="json")), encoding="utf-8")
+        os.chmod(neu, 0o600)
+        neu.replace(self.datei)

@@ -1,0 +1,15 @@
+name = "Propaganda-Filter"
+zweck = "Werbung in Ton finden"
+beschreibung = "vergleicht zwei Fassungen einer Folge und sammelt eingesetzte Stellen als Signaturen"
+
+[[teile]]
+kennung = "dienst"
+name = "Dienst"
+zweck = "Vergleiche und Signaturen"
+ordner = "@ORDNER@"  # setzt tools/einrichten.sh
+befehl = [".venv/bin/uvicorn", "--factory", "propagandafilter.main:app_bauen", "--host", "127.0.0.1", "--port", "8572", "--log-level", "warning"]
+port = 8572
+pruefadresse = "http://127.0.0.1:8572/openapi.json"
+speicher_gb = 1.0
+# Platte: Datenordner (Einstellungen, Signaturen mit Ausschnitten, Arbeitsdateien laufender Vergleiche)
+daten = ["~/Library/Application Support/Propaganda-Filter"]
