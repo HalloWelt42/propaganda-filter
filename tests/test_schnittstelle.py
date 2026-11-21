@@ -25,7 +25,9 @@ async def test_vergleich_findet_spot_und_hebt_signatur_auf(filter_, anbieter, fa
     fertig = await warten(filter_, auftrag["id"])
     assert fertig["zustand"] == "fertig", fertig
     e = fertig["ergebnis"]
-    assert not e["gleich"] and e["verwertbar"] and e["nur_in_b"] == []
+    assert not e["gleich"] and e["verwertbar"] and len(e["abgleiche"]) == 3
+    assert all(x["nur_in_b"] == [] and not x["gleich"] for x in e["abgleiche"])
+    assert len(set(anbieter.kennungen)) == 3                    # je Fassung eine andere Kennung
     [stelle] = e["nur_in_a"]
     assert abs(stelle["von"] - 20) <= 0.1 and abs(stelle["bis"] - 28) <= 0.1 and stelle["signatur"]
 
@@ -43,6 +45,19 @@ async def test_vergleich_findet_spot_und_hebt_signatur_auf(filter_, anbieter, fa
     assert (await filter_.get(f"/api/v1/vergleiche/{auftrag['id']}", headers=FUNDUS)).status_code == 403
 
 
+async def test_werbeplatz_aus_mehreren_fassungen(filter_, anbieter, fassungen):
+    """Spektrum 21.11.2026: ein Platz aus zwei Spots; je Abruf ist zufällig einer davon gleich. Erst alle Fassungen
+    zusammen zeigen den ganzen Platz, als eine Stelle."""
+    anbieter.dateien = [fassungen["nur_x"], fassungen["nur_y"], fassungen["platz"]]
+    fertig = await warten(filter_, (await _bestellen(filter_, fassungen["platz"]))["id"])
+    e = fertig["ergebnis"]
+    einzeln = [[(round(x["von"]), round(x["bis"])) for x in g["nur_in_a"]] for g in e["abgleiche"]]
+    assert einzeln == [[(30, 40)], [(20, 30)], []]                 # die dritte Fassung ist byte-gleich
+    assert e["abgleiche"][2]["gleich"] and not e["gleich"]
+    [platz] = e["nur_in_a"]
+    assert abs(platz["von"] - 20) <= 0.1 and abs(platz["bis"] - 40) <= 0.1 and platz["signatur"]
+
+
 async def test_gleiche_bytes(filter_, anbieter, fassungen):
     anbieter.datei = fassungen["b"]
     fertig = await warten(filter_, (await _bestellen(filter_, fassungen["b"]))["id"])
@@ -53,7 +68,7 @@ async def test_andere_folge_nennt_keine_stellen(filter_, anbieter, fassungen):
     anbieter.datei = fassungen["anders"]
     fertig = await warten(filter_, (await _bestellen(filter_, fassungen["b"]))["id"])
     e = fertig["ergebnis"]
-    assert not e["verwertbar"] and e["nur_in_a"] == [] and "nicht dieselbe Folge" in e["hinweis"]
+    assert not e["verwertbar"] and e["nur_in_a"] == [] and "dieselbe Folge" in e["hinweis"]
     assert (await filter_.get("/api/v1/stand", headers=RADIOHUB)).json()["signaturen"]["offen"] == 0
 
 

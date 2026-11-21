@@ -51,13 +51,20 @@ def s(sekunden: float) -> int:
 
 @pytest.fixture(scope="session")
 def fassungen(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
-    """inhalt: 60 s; a: mit Spot (8 s) nach 20 s; b: ohne; anders: eine ganz andere Folge."""
+    """inhalt: 60 s; a: mit Spot (8 s) nach 20 s; b: ohne; anders: eine ganz andere Folge.
+    platz: ein Werbeplatz aus zwei Spots X und Y nach 20 s (wie Spektrum am 21.11.2026); nur_x und nur_y: andere
+    Abrufe, in denen zufällig einer der beiden Spots gleich ist."""
     o = tmp_path_factory.mktemp("ton")
     inhalt, spot = klang(60, 1), klang(8, 2)
+    x, y = klang(10, 4), klang(10, 5)
+    mit = lambda *teile: np.concatenate([inhalt[:s(20)], *teile, inhalt[s(20):]])
     return {
-        "a": schreiben(o / "a.wav", np.concatenate([inhalt[:s(20)], spot, inhalt[s(20):]])),
+        "a": schreiben(o / "a.wav", mit(spot)),
         "b": schreiben(o / "b.wav", inhalt),
         "anders": schreiben(o / "anders.wav", klang(60, 3)),
+        "platz": schreiben(o / "platz.wav", mit(x, y)),
+        "nur_x": schreiben(o / "nur_x.wav", mit(x, klang(10, 6))),
+        "nur_y": schreiben(o / "nur_y.wav", mit(klang(10, 7), y)),
     }
 
 
@@ -74,15 +81,19 @@ class Anbieter:
 
     def __init__(self) -> None:
         self.datei: Path | None = None
+        self.dateien: list[Path] = []      # je Abruf die nächste (wechselnde Werbung); leer: immer `datei`
         self.status = 200
         self.abrufe = 0
+        self.kennungen: list[str] = []
 
     def transport(self) -> httpx.MockTransport:
         def antwort(r: httpx.Request) -> httpx.Response:
             self.abrufe += 1
-            if str(r.url) != FOLGE or self.datei is None or self.status != 200:
+            self.kennungen.append(r.headers.get("user-agent", ""))
+            datei = self.dateien[(self.abrufe - 1) % len(self.dateien)] if self.dateien else self.datei
+            if str(r.url) != FOLGE or datei is None or self.status != 200:
                 return httpx.Response(self.status if self.status != 200 else 404)
-            return httpx.Response(200, content=self.datei.read_bytes(), headers={"content-type": "audio/wav"})
+            return httpx.Response(200, content=datei.read_bytes(), headers={"content-type": "audio/wav"})
         return httpx.MockTransport(antwort)
 
 

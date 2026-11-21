@@ -35,12 +35,29 @@ class KellerwolkeEinstellungen(_Modell):
         return "" if wert is None else str(wert)
 
 
-class Abruf(_Modell):
-    """Wie der Filter die zweite Fassung beim Anbieter holt."""
+KENNUNGEN = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36",
+]
 
-    kennung: str = Field("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
-                         description="User-Agent beim Abruf; Anbieter setzen Werbung oft je Gerät ein")
+
+class Abruf(_Modell):
+    """Wie der Filter weitere Fassungen beim Anbieter holt. Je Kennung eine Fassung: an einem Werbeplatz laufen oft
+    mehrere Spots, und ein Spot, der zufällig in beiden Fassungen gleich ist, fällt im Vergleich nicht auf; erst
+    mehrere Fassungen zeigen den ganzen Platz (gemessen an Spektrum, 21.11.2026)."""
+
+    kennungen: list[str] = Field(default_factory=lambda: list(KENNUNGEN), min_length=1, max_length=8,
+                                 description="User-Agent je weiterer Fassung; Anbieter setzen Werbung je Abruf und Gerät ein")
     zeitgrenze_s: float = Field(600.0, gt=0, le=7200)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _frueher_eine_kennung(cls, daten: object) -> object:
+        """Fassung 0.1: eine Kennung (`kennung`); sie gilt nicht mehr, es gelten die Vorgaben."""
+        if isinstance(daten, dict) and "kennung" in daten:
+            daten = {k: v for k, v in daten.items() if k != "kennung"}
+        return daten
 
 
 class Grenzen(_Modell):
@@ -54,6 +71,7 @@ class Klang(_Modell):
 
     gleich: float = Field(0.85, gt=0, lt=1, description="ab dieser Güte gilt ein Stück von 5 s als in der anderen Fassung gefunden")
     stelle_mindestens_s: float = Field(3.0, ge=0.5, le=60, description="kürzere Abschnitte, die nur in einer Fassung vorkommen, zählen nicht")
+    luecke_hoechstens_s: float = Field(1.5, ge=0, le=10, description="Stellen mit höchstens so viel Abstand sind ein Werbeplatz")
     gemeinsam_mindestens: float = Field(0.5, gt=0, le=1, description="so viel von A muss in B vorkommen, sonst sind es verschiedene Folgen")
 
 

@@ -4,9 +4,12 @@ Kleiner Dienst am Mac, der Werbung in Ton findet, für eigene Apps (zuerst Radio
 Mac rechnet. Gefundene Stellen hebt der Filter als Signaturen auf: kurze Ausschnitte, die ein Mensch anhören,
 bestätigen oder verwerfen kann. Die Signaturen liegen im Datenordner, nie im Repository.
 
-Erste Funktion: **zwei Fassungen derselben Folge vergleichen.** Viele Anbieter setzen Werbung erst beim Abruf ein, je
-Abruf andere. Die App reicht ihre gespeicherte Datei ein (Fassung A), der Filter holt dieselbe Folge selbst noch einmal
-(Fassung B), richtet beide am Klang aus und nennt auf 10 ms genau, was nur in einer vorkommt.
+Erste Funktion: **Fassungen derselben Folge vergleichen.** Viele Anbieter setzen Werbung erst beim Abruf ein, je
+Abruf andere. Die App reicht ihre gespeicherte Datei ein (Fassung A), der Filter holt dieselbe Folge selbst mehrmals
+(je Kennung eine weitere Fassung), richtet jede am Klang an A aus und nennt auf 10 ms genau, was in A vorkommt, in einer
+anderen aber fehlt. An einem Werbeplatz laufen oft mehrere Spots; einer davon kann in einer weiteren Fassung zufällig
+gleich sein und fällt erst gegen eine andere auf. Darum zählen alle Vergleiche zusammen, und Spots mit höchstens
+`klang.luecke_hoechstens_s` Abstand bilden einen Werbeplatz.
 
 ## Vertrag
 
@@ -28,10 +31,12 @@ Schema unter `https://<mac>:<vorne>/openapi.json` (über den Vorbau des Macs). J
 `fortschritt` (0 bis 1), `angelegt, beendet, fehler, ergebnis`. Es rechnen höchstens `grenzen.gleichzeitig` Aufträge
 zugleich; fertige bleiben `grenzen.auftraege_behalten_s` abrufbar und überleben keinen Neustart.
 
-**Ergebnis:** `gleich` (Byte für Byte gleich, dann ist nichts eingesetzt), `verwertbar` (genug gemeinsamer Klang, sonst
-sind es verschiedene Folgen und es werden keine Stellen genannt), `dauer_a, dauer_b, anteil_gemeinsam`, `nur_in_a` und
-`nur_in_b` als `{von, bis, signatur}` in Sekunden der jeweiligen Fassung, `hinweis`. Die Zeiten von `nur_in_a` gelten
-genau für die eingereichte Datei.
+**Ergebnis:** `gleich` (alle Fassungen Byte für Byte gleich mit A, dann ist nichts eingesetzt), `verwertbar` (mindestens
+eine Fassung hat genug gemeinsamen Klang, sonst sind es verschiedene Folgen und es werden keine Stellen genannt),
+`dauer_a`, `anteil_gemeinsam` (der kleinste), `nur_in_a` als `{von, bis, signatur}`: die Werbeplätze in A, vereinigt
+über alle Vergleiche; `abgleiche` je weitere Fassung `{kennung, gleich, verwertbar, dauer, anteil_gemeinsam, nur_in_a,
+nur_in_b}` (Sekunden der jeweiligen Fassung), `hinweis`. Die Zeiten von `nur_in_a` gelten genau für die eingereichte
+Datei.
 
 **Signatur:** `id, quelle, app, herkunft` (`vergleich`), `fassung` (`a` oder `b`), `von_s, bis_s, dauer_s, auftrag,
 angelegt, urteil, beurteilt`. Verworfene bleiben mit ihrem Urteil stehen; gelöscht wird nichts.
@@ -53,8 +58,8 @@ Legt das venv an (Python 3.13), installiert die Pakete, setzt die Git-Hooks und 
 (lokal `127.0.0.1:8572`). Von außen nur über den Vorbau des Macs (HTTPS, Port 8573). Braucht FFmpeg im Suchpfad.
 
 Datenordner: `~/Library/Application Support/Propaganda-Filter` (oder `PROPAGANDAFILTER_DATEN`) mit
-`einstellungen.toml` (Vorgaben beim ersten Start; Erlaubnisliste, Kellerwolke, Abruf, Grenzen, Schwellen,
-Signaturen), `signaturen/` (Datenbank und Ausschnitte) und `arbeit/` (Dateien laufender Vergleiche, danach entfernt).
+`einstellungen.toml` (Vorgaben beim ersten Start; Erlaubnisliste, Kellerwolke, Abruf mit den Kennungen je weiterer
+Fassung, Grenzen, Schwellen, Signaturen), `signaturen/` (Datenbank und Ausschnitte) und `arbeit/` (Dateien laufender Vergleiche, danach entfernt).
 Geänderte Einstellungen gelten ab dem nächsten Auftrag; eine ungültige Fassung wird übergangen, `GET /api/v1/stand`
 nennt den Fehler.
 

@@ -19,14 +19,27 @@ class Fundstelle(BaseModel):
     signatur: str | None = Field(None, description="Kennung der aufgehobenen Signatur, falls eine angelegt wurde")
 
 
+class Abgleich(BaseModel):
+    """Vergleich der eingereichten Fassung A mit einer weiteren Fassung, die der Filter geholt hat."""
+
+    kennung: str = Field(description="User-Agent, mit dem diese Fassung geholt wurde")
+    gleich: bool = Field(description="Byte für Byte gleich mit A")
+    verwertbar: bool = Field(True, description="dieselbe Folge (genug gemeinsamer Klang)")
+    dauer: float | None = None
+    anteil_gemeinsam: float | None = Field(None, description="Anteil von A, der auch in dieser Fassung vorkommt")
+    nur_in_a: list[Fundstelle] = Field(default_factory=list, description="in diesem Vergleich nur in A (ohne Ausschnitt)")
+    nur_in_b: list[Fundstelle] = Field(default_factory=list, description="nur in dieser Fassung (Sekunden dieser Fassung)")
+
+
 class Ergebnis(BaseModel):
-    gleich: bool = Field(description="beide Fassungen sind Byte für Byte gleich (dann ist nichts eingesetzt)")
-    verwertbar: bool = Field(description="die Fassungen sind dieselbe Folge (genug gemeinsamer Klang)")
+    gleich: bool = Field(description="alle Fassungen sind Byte für Byte gleich mit A (dann ist nichts eingesetzt)")
+    verwertbar: bool = Field(description="mindestens eine Fassung ist dieselbe Folge (genug gemeinsamer Klang)")
     dauer_a: float | None = None
-    dauer_b: float | None = None
-    anteil_gemeinsam: float | None = Field(None, description="Anteil von A, der auch in B vorkommt")
-    nur_in_a: list[Fundstelle] = Field(default_factory=list, description="nur in der eingereichten Fassung")
-    nur_in_b: list[Fundstelle] = Field(default_factory=list, description="nur in der vom Filter geholten Fassung")
+    anteil_gemeinsam: float | None = Field(None, description="kleinster Anteil von A, der in einer Fassung vorkommt")
+    nur_in_a: list[Fundstelle] = Field(default_factory=list,
+                                       description="Werbeplätze in A: was in mindestens einer weiteren Fassung fehlt, "
+                                                   "aneinanderstoßende Spots zu einem Platz zusammengefasst")
+    abgleiche: list[Abgleich] = Field(default_factory=list, description="je weitere Fassung der einzelne Vergleich")
     hinweis: str | None = None
 
 

@@ -174,6 +174,19 @@ def _begrenzen(a: np.ndarray, b: np.ndarray, von: float, bis: float, versatz: in
     return Lauf(round(anfang * ZEILE_S, 2), round(ende * ZEILE_S, 2), round((versatz + k) * ZEILE_S, 2))
 
 
+def vereinigen(listen: list[list[Stelle]], luecke_s: float = 0.0) -> list[Stelle]:
+    """Stellen aus mehreren Vergleichen derselben Fassung zusammen: was in irgendeinem Vergleich nur hier vorkommt,
+    gehört dazu; überlappende oder höchstens `luecke_s` auseinanderliegende Stellen werden ein Abschnitt."""
+    alle = sorted((s for l in listen for s in l), key=lambda s: s.von)
+    zusammen: list[Stelle] = []
+    for s in alle:
+        if zusammen and s.von <= zusammen[-1].bis + luecke_s:
+            zusammen[-1] = Stelle(zusammen[-1].von, max(zusammen[-1].bis, s.bis))
+        else:
+            zusammen.append(s)
+    return zusammen
+
+
 def vergleichen(a: np.ndarray, b: np.ndarray, *, gleich: float = 0.85, mindestens_s: float = 3.0,
                 fortschritt: Fortschritt = lambda _: None) -> Bild:
     """Wie A (Merkmale) in B vorkommt: gemeinsame Läufe auf 10 ms genau und dazwischen, was nur in A ist."""
