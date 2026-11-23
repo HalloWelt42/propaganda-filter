@@ -20,6 +20,8 @@ from .auftraege import Auftragsbuch
 from .einstellungen import Einstellungsquelle
 from .fassung import fassung
 from .kellerwolke import KellerwolkePruefer
+from .lernbuch import Lernbuch
+from .lernlauf import Lernlauf
 from .signaturen import Signaturbuch
 from .strom import Stroeme
 from .vergleich import Vergleicher
@@ -33,7 +35,7 @@ def datenordner() -> Path:
 
 def app_bauen(daten: Path | None = None, *, kellerwolke: httpx.AsyncBaseTransport | None = None,
               anbieter: httpx.AsyncBaseTransport | None = None) -> FastAPI:
-    """`kellerwolke` und `anbieter` ersetzen in Tests die Verbindungen zur Kellerwolke und zum Anbieter der Folgen."""
+    """`kellerwolke` und `anbieter` ersetzen in Tests die Verbindungen zur Kellerwolke und zu Anbietern und Sendern."""
     daten = daten or datenordner()
     daten.mkdir(parents=True, exist_ok=True, mode=0o700)
     quelle = Einstellungsquelle(daten / "einstellungen.toml")
@@ -44,20 +46,25 @@ def app_bauen(daten: Path | None = None, *, kellerwolke: httpx.AsyncBaseTranspor
         Vergleicher.wegraeumen_ordner(rest)
     vergleicher = Vergleicher(arbeit, signaturen, quelle.aktuell, transport=anbieter)
     stroeme = Stroeme(lambda: quelle.aktuell().wiedererkennen.stroeme_hoechstens, lambda: quelle.aktuell().wiedererkennen.stille_s)
+    buch = Lernbuch(daten / "lernlauf")
+    lernlauf = Lernlauf(daten / "lernlauf", buch, signaturen, quelle.aktuell, transport=anbieter)
     auftraege = Auftragsbuch(lambda: quelle.aktuell().grenzen.gleichzeitig,
                              lambda: quelle.aktuell().grenzen.auftraege_behalten_s)
 
     @asynccontextmanager
     async def lebenslauf(_app: FastAPI) -> AsyncIterator[None]:
+        lernlauf.starten()
         yield
+        await lernlauf.schliessen()
         await stroeme.schliessen()
         await auftraege.schliessen()
         await pruefer.schliessen()
+        buch.schliessen()
         signaturen.schliessen()
 
     app = FastAPI(title="Propaganda-Filter", version=fassung(), lifespan=lebenslauf,
                   description="Findet Werbung in Ton: vergleicht zwei Fassungen derselben Folge und hebt die "
                               "eingesetzten Stellen als Signaturen auf.")
     fehler_einhaengen(app)
-    app.include_router(schnittstelle(quelle, pruefer, auftraege, vergleicher, signaturen, stroeme))
+    app.include_router(schnittstelle(quelle, pruefer, auftraege, vergleicher, signaturen, stroeme, lernlauf))
     return app

@@ -96,6 +96,29 @@ class Wiedererkennen(_Modell):
     stille_s: float = Field(120.0, ge=10, le=3600, description="ein Strom, der so lange nichts schickt, ist beendet")
 
 
+class Lernlauf(_Modell):
+    """Sender im Hintergrund hören und wiederkehrende Stücke sammeln. Diesen Abschnitt stellt auch die App (PUT /api/v1/lernlauf)."""
+
+    an: bool = Field(False, description="im Zeitfenster hören")
+    von: str = Field("01:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    bis: str = Field("06:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    gleichzeitig: int = Field(4, ge=1, le=12, description="so viele Sender zugleich")
+    sitzung_min: int = Field(45, ge=5, le=240, description="so lange am Stück je Sender")
+    kbit_hoechstens: int = Field(192, ge=32, le=1500, description="ein Mitschnitt wird nie größer, als er mit dieser Bitrate wäre")
+    archiv_h: float = Field(96.0, ge=1, le=1000, description="so lange zurück wird verglichen")
+    mindestens_s: float = Field(8.0, ge=3, le=60)
+    hoechstens_s: float = Field(65.0, ge=10, le=300)
+
+
+class Leitstelle(_Modell):
+    """Kandidaten mithören lassen (Abschrift) und einschätzen, über die Leitstelle. Ohne Schlüssel ruht das."""
+
+    adresse: str = Field("https://leitstelle.pi5.lan", pattern=r"^https?://[^\s/]+(:\d+)?/?$")
+    schluessel: str = ""
+    hoerdienst: str = Field("klangwerk", max_length=100)
+    modell: str = Field("", max_length=200, description="Sprachmodell für die Einschätzung; leer: nur Abschrift")
+
+
 class Einstellungen(_Modell):
     erlaubte_apps: list[str] = Field(default_factory=lambda: ["radiohub"])
     kellerwolke: KellerwolkeEinstellungen = Field(default_factory=KellerwolkeEinstellungen)
@@ -104,6 +127,8 @@ class Einstellungen(_Modell):
     klang: Klang = Field(default_factory=Klang)
     signaturen: Signaturen = Field(default_factory=Signaturen)
     wiedererkennen: Wiedererkennen = Field(default_factory=Wiedererkennen)
+    lernlauf: Lernlauf = Field(default_factory=Lernlauf)
+    leitstelle: Leitstelle = Field(default_factory=Leitstelle)
 
     @model_validator(mode="after")
     def _pruefen(self) -> Einstellungen:

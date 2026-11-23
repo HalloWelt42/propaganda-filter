@@ -101,3 +101,20 @@ class Quellenstand(BaseModel):
 
 class Beurteilung(BaseModel):
     urteil: Literal["offen", "bestaetigt", "verworfen"]
+
+
+class Lernlaufstellung(BaseModel):
+    """Was die App am Lernlauf einstellt; was fehlt, bleibt."""
+
+    an: bool | None = None
+    von: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    bis: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    gleichzeitig: int | None = Field(None, ge=1, le=12)
+
+
+class Sofortlauf(BaseModel):
+    minuten: float = Field(ge=0, le=720, description="0 beendet einen von Hand gestarteten Lauf")
+
+
+class Senderausnahme(BaseModel):
+    aus: bool

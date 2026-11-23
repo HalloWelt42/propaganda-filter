@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -16,7 +16,11 @@ from .einstellungen import Einstellungsquelle
 from .fassung import fassung
 from .klang import KlangFehler
 from .kellerwolke import AppIdentitaet, KellerwolkePruefer, NichtAngemeldet, NichtErreichbar
-from .modelle import Auftrag, Beurteilung, NeuerStrom, Quellenstand, Signaturliste, Spotstelle, Stand, Stromstand
+from .lernbuch import Lernsender, Senderstand
+from .lernlauf import Lernlauf, Lernstand
+from .modelle import (
+    Auftrag, Beurteilung, Lernlaufstellung, NeuerStrom, Quellenstand, Senderausnahme, Signaturliste, Sofortlauf, Spotstelle, Stand, Stromstand,
+)
 from .signaturen import ENDUNG, Signatur, SignaturFehler, Signaturbuch, Urteil
 from .strom import Fund, Strom, StromFehler, Stroeme
 from .vergleich import Vergleicher
@@ -50,7 +54,7 @@ async def _empfangen(request: Request, ziel: Path, grenze: int) -> int:
 
 
 def schnittstelle(quelle: Einstellungsquelle, pruefer: KellerwolkePruefer, auftraege: Auftragsbuch,
-                  vergleicher: Vergleicher, signaturen: Signaturbuch, stroeme: Stroeme) -> APIRouter:
+                  vergleicher: Vergleicher, signaturen: Signaturbuch, stroeme: Stroeme, lernlauf: Lernlauf) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["filter"])
 
     async def aktuelle_app(anmeldung: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)]) -> AppIdentitaet:
@@ -205,6 +209,43 @@ def schnittstelle(quelle: Einstellungsquelle, pruefer: KellerwolkePruefer, auftr
     async def beurteilen(signatur_id: UUID, b: Beurteilung, _app: App) -> Signatur:
         """Bestätigen oder verwerfen (Irrtümer herausfiltern); verworfene bleiben mit ihrem Urteil stehen."""
         return signaturen.beurteilen(_signatur(signatur_id), b.urteil)
+
+    # ----- Lernlauf
+
+    @router.get("/lernlauf", response_model=Lernstand)
+    async def lernstand(_app: App) -> Lernstand:
+        """Was der Lernlauf gerade hört, als Nächstes hört und in den letzten Läufen fand."""
+        return lernlauf.stand()
+
+    @router.put("/lernlauf", response_model=Lernstand)
+    async def lernlauf_stellen(neu: Lernlaufstellung, _app: App) -> Lernstand:
+        e = quelle.aktuell()
+        quelle.speichern(e.model_copy(update={"lernlauf": e.lernlauf.model_copy(update=neu.model_dump(exclude_none=True))}))
+        return lernlauf.stand()
+
+    @router.post("/lernlauf/jetzt", response_model=Lernstand)
+    async def lernlauf_jetzt(neu: Sofortlauf, _app: App) -> Lernstand:
+        """Auch außerhalb des Zeitfensters hören."""
+        lernlauf.jetzt_laufen(neu.minuten)
+        return lernlauf.stand()
+
+    @router.get("/lernlauf/sender", response_model=list[Senderstand])
+    async def lernsender(_app: App) -> list[Senderstand]:
+        return lernlauf.buch.sender()
+
+    @router.put("/lernlauf/sender", response_model=Lernstand)
+    async def lernsender_setzen(sender: Annotated[list[Lernsender], Body(max_length=2000)], _app: App) -> Lernstand:
+        """Die ganze Liste der App, mit Grund und Gewicht; was fehlt, ruht."""
+        lernlauf.buch.sender_setzen(sender)
+        return lernlauf.stand()
+
+    @router.put("/lernlauf/sender/{quelle_kennung}", response_model=list[Senderstand])
+    async def lernsender_ausnehmen(quelle_kennung: str, neu: Senderausnahme, _app: App) -> list[Senderstand]:
+        try:
+            lernlauf.buch.ausnehmen(quelle_kennung, neu.aus)
+        except KeyError:
+            raise HTTPException(404, "Sender unbekannt") from None
+        return lernlauf.buch.sender()
 
     return router
 
