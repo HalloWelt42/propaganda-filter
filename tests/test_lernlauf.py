@@ -84,7 +84,8 @@ def test_auswahl_der_sender(tmp_path):
     assert [x.quelle for x in b.naechste(9)] == ["aehnlich"]
     b.sender_setzen([L("neu", "favorit")])               # die anderen ruhen mit ihren Zahlen
     assert [x.quelle for x in b.naechste(9)] == ["neu"]
-    assert {x.quelle: (x.dabei, x.kandidaten, x.stunden) for x in b.sender()}["oft"] == (False, 2, 0.5)
+    assert {x.quelle: (x.dabei, x.kandidaten, x.stunden) for x in [b.einer("oft")]}["oft"] == (False, 2, 0.5)
+    assert b.sender().gesamt == 1 and [x.quelle for x in b.sender().sender] == ["neu"]
     assert (b.laeufe()[0].sender, b.laeufe()[0].fehler, b.laeufe()[0].neu) == (1, 1, 2)
 
 
@@ -112,10 +113,16 @@ async def test_ganzer_lauf(tmp_path: Path, monkeypatch):
         (sig,) = (await c.get("/api/v1/signaturen")).json()["signaturen"]
         assert (sig["herkunft"], sig["urteil"]) == ("lernlauf", "offen") and abs(sig["dauer_s"] - 20) < 1.5
         assert {q["quelle"]: q["stand"] for q in sig["quellen"]} == {"a": "vorschlag", "b": "vorschlag"}
-        st = {x["quelle"]: x for x in (await c.get("/api/v1/lernlauf/sender")).json()}
+        st = {x["quelle"]: x for x in (await c.get("/api/v1/lernlauf/sender")).json()["sender"]}
         assert "404" in st["weg"]["fehler"] and st["a"]["kandidaten"] + st["b"]["kandidaten"] == 1
-        assert (await c.put("/api/v1/lernlauf/sender/a", json={"aus": True})).json()[0]["quelle"]
+        assert (await c.put("/api/v1/lernlauf/sender/a", json={"aus": True})).json()["aus"] is True
+        s2 = (await c.get("/api/v1/lernlauf/sender", params={"ab": 1, "anzahl": 1})).json()
+        assert s2["gesamt"] == 3 and len(s2["sender"]) == 1
+        f = (await c.get("/api/v1/signaturen/fach/pruefen")).json()
+        assert f["faecher"] == {"pruefen": 1, "wirkt": 0, "verworfen": 0} and [x["id"] for x in f["signaturen"]] == [sig["id"]]
+        assert (await c.get("/api/v1/signaturen/fach/pruefen", params={"ab": 1})).json()["signaturen"] == []
         assert list((tmp_path / "daten" / "lernlauf" / "arbeit").iterdir()) == [], "der Ton bleibt nicht"
         await c.put(f"/api/v1/signaturen/{sig['id']}", json={"urteil": "bestaetigt"})
         assert {q["stand"] for q in (await c.get("/api/v1/signaturen")).json()["signaturen"][0]["quellen"]} == {"wirkt"}
+        assert (await c.get("/api/v1/signaturen/fach/wirkt")).json()["faecher"] == {"pruefen": 0, "wirkt": 1, "verworfen": 0}
         await c.post("/api/v1/lernlauf/jetzt", json={"minuten": 0})

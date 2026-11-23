@@ -54,5 +54,23 @@ async def test_angabe_des_senders_bleibt(tmp_path):
     assert b.eine(kennung).werbender == "firma.de"
 
 
+def test_durchsicht_nach_aussicht(tmp_path):
+    b, erste = buch(tmp_path)
+    ton = tmp_path / "t.wav"
+    ids = {"eigen": erste}
+    for name in ("werbung", "neu", "oft"):
+        ids[name] = b.aufnehmen(ton, 1, 11, quelle="S", app="", herkunft="lernlauf", fassung="", auftrag="", quelle_kennung="u1").id
+    b.text_setzen(erste, "x", "sender", "")
+    b.text_setzen(ids["werbung"], "x", "werbung", "Firma")
+    b.text_setzen(ids["oft"], "x", "werbung", "Andere")
+    b.treffer(ids["oft"], "u1", "S")
+    assert [s.id for s in b.im_fach("pruefen", 0, 9)] == [ids["oft"], ids["werbung"], ids["neu"], ids["eigen"]]
+    assert [s.id for s in b.im_fach("pruefen", 1, 2)] == [ids["werbung"], ids["neu"]]
+    b.beurteilen(ids["oft"], "bestaetigt")
+    assert b.treffer(ids["oft"], "u9", "Neuer Sender") == "vorschlag"          # bestätigt, aber an einer neuen Quelle: wieder zu prüfen
+    b.beurteilen(erste, "verworfen")
+    assert b.faecher() == {"pruefen": 3, "wirkt": 0, "verworfen": 1}
+
+
 def test_ohne_schluessel_ruht_es(tmp_path):
     assert not Abschrift(Signaturbuch(tmp_path / "sig"), Einstellungen).eingerichtet

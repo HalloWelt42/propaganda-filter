@@ -68,6 +68,13 @@ class Senderstand(Lernsender):
     fehler: str
 
 
+class Senderseite(BaseModel):
+    """Ein Stück der Liste und wie viele Sender sie hat."""
+
+    gesamt: int
+    sender: list[Senderstand]
+
+
 class Lauf(BaseModel):
     id: str
     begonnen: str
@@ -117,8 +124,18 @@ class Lernbuch:
         if self._db.execute("update sender set aus = ? where quelle = ?", (int(aus), quelle)).rowcount == 0:
             raise KeyError(quelle)
 
-    def sender(self) -> list[Senderstand]:
-        return [self._senderstand(z) for z in self._db.execute("select * from sender order by dabei desc, kandidaten + bekannte desc, name")]
+    def sender(self, ab: int = 0, anzahl: int = 1000) -> Senderseite:
+        """Die Sender der Liste, die mit den meisten Funden zuerst."""
+        gesamt = self._db.execute("select count(*) from sender where dabei = 1").fetchone()[0]
+        zeilen = self._db.execute("select * from sender where dabei = 1 order by kandidaten + bekannte desc, zuletzt is null, name, quelle limit ? offset ?",
+                                  (anzahl, ab)).fetchall()
+        return Senderseite(gesamt=gesamt, sender=[self._senderstand(z) for z in zeilen])
+
+    def einer(self, quelle: str) -> Senderstand:
+        z = self._db.execute("select * from sender where quelle = ?", (quelle,)).fetchone()
+        if z is None:
+            raise KeyError(quelle)
+        return self._senderstand(z)
 
     @staticmethod
     def _senderstand(z: sqlite3.Row) -> Senderstand:

@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .signaturen import Signatur
+from .signaturen import Fach, Signatur
 
 Zustand = Literal["wartet", "laeuft", "fertig", "fehler"]
 
@@ -69,6 +69,13 @@ class Stand(BaseModel):
 
 
 class Signaturliste(BaseModel):
+    signaturen: list[Signatur]
+
+
+class Fachseite(BaseModel):
+    """Ein Stück eines Fachs der Durchsicht und wie viele in jedem Fach liegen."""
+
+    faecher: dict[Fach, int]
     signaturen: list[Signatur]
 
 

@@ -25,6 +25,7 @@ from .klang import KlangFehler, dekodieren
 
 Urteil = Literal["offen", "bestaetigt", "verworfen"]
 Stand = Literal["wirkt", "vorschlag"]
+Fach = Literal["pruefen", "wirkt", "verworfen"]
 
 #: aus diesen Herkünften wirkt eine Signatur in ihrer eigenen Quelle, auch bevor ein Mensch sie bestätigt
 SOFORT = frozenset({"vergleich", "angabe", "schnitt"})
@@ -68,6 +69,16 @@ create table signatur_quellen (
 create index signatur_quellen_quelle on signatur_quellen(quelle);
 """,
 ]
+
+#: in welchem Fach der Durchsicht eine Signatur liegt: verworfen; zu prüfen (Vorschlag des Lernlaufs oder bekannt, aber an einer
+#: neuen Quelle gehört); sonst wirkt sie
+FACH_SQL = """case when s.urteil = 'verworfen' then 'verworfen'
+  when s.urteil = 'offen' and s.herkunft = 'lernlauf' then 'pruefen'
+  when exists (select 1 from signatur_quellen q where q.signatur = s.id and q.stand = 'vorschlag') then 'pruefen'
+  else 'wirkt' end"""
+#: was am ehesten Werbung ist, zuerst
+RANG_SQL = "case s.einschaetzung when 'werbung' then 0 when 'anderes' then 2 when 'sender' then 3 when 'ohne_sprache' then 4 else 1 end"
+TREFFER_SQL = "coalesce((select sum(q.treffer) from signatur_quellen q where q.signatur = s.id), 0)"
 
 ENDUNG = ".m4a"
 
@@ -241,6 +252,19 @@ class Signaturbuch:
         sql = "select id from signaturen" + (" where urteil = ?" if urteil else "") + " order by angelegt desc limit ?"
         werte = (urteil, grenze) if urteil else (grenze,)
         return [self.eine(z["id"]) for z in self._db.execute(sql, werte).fetchall()]
+
+    def faecher(self) -> dict[Fach, int]:
+        zahlen: dict[Fach, int] = {"pruefen": 0, "wirkt": 0, "verworfen": 0}
+        for z in self._db.execute(f"select {FACH_SQL} as fach, count(*) as n from signaturen s group by 1"):
+            zahlen[z["fach"]] = z["n"]
+        return zahlen
+
+    def im_fach(self, fach: Fach, ab: int, anzahl: int) -> list[Signatur]:
+        """Ein Stück eines Fachs: zu Prüfendes nach Aussicht, sonst was am öftesten lief."""
+        rang = f"{RANG_SQL}, " if fach == "pruefen" else ""
+        zeilen = self._db.execute(f"select s.id from signaturen s where {FACH_SQL} = ? order by {rang}{TREFFER_SQL} desc, s.angelegt desc, s.id"
+                                  " limit ? offset ?", (fach, anzahl, ab)).fetchall()
+        return [self.eine(z["id"]) for z in zeilen]
 
     def zahlen(self) -> dict[str, int]:
         zahlen = {"offen": 0, "bestaetigt": 0, "verworfen": 0}

@@ -17,12 +17,12 @@ from .einstellungen import Einstellungsquelle
 from .fassung import fassung
 from .klang import KlangFehler
 from .kellerwolke import AppIdentitaet, KellerwolkePruefer, NichtAngemeldet, NichtErreichbar
-from .lernbuch import Lernsender, Senderstand
+from .lernbuch import Lernsender, Senderseite, Senderstand
 from .lernlauf import Lernlauf, Lernstand
 from .modelle import (
-    Auftrag, Beurteilung, Lernlaufstellung, NeuerStrom, Quellenstand, Senderausnahme, Signaturliste, Sofortlauf, Spotstelle, Stand, Stromstand,
+    Auftrag, Beurteilung, Fachseite, Lernlaufstellung, NeuerStrom, Quellenstand, Senderausnahme, Signaturliste, Sofortlauf, Spotstelle, Stand, Stromstand,
 )
-from .signaturen import ENDUNG, Signatur, SignaturFehler, Signaturbuch, Urteil
+from .signaturen import ENDUNG, Fach, Signatur, SignaturFehler, Signaturbuch, Urteil
 from .strom import Fund, Strom, StromFehler, Stroeme
 from .vergleich import Vergleicher
 
@@ -196,6 +196,12 @@ def schnittstelle(quelle: Einstellungsquelle, pruefer: KellerwolkePruefer, auftr
                     grenze: Annotated[int, Query(ge=1, le=1000)] = 200) -> Signaturliste:
         return Signaturliste(signaturen=signaturen.liste(urteil, grenze))
 
+    @router.get("/signaturen/fach/{fach}", response_model=Fachseite)
+    async def fachseite(fach: Fach, _app: App, ab: Annotated[int, Query(ge=0)] = 0,
+                        anzahl: Annotated[int, Query(ge=1, le=200)] = 25) -> Fachseite:
+        """Durchsicht: ein Stück eines Fachs."""
+        return Fachseite(faecher=signaturen.faecher(), signaturen=signaturen.im_fach(fach, ab, anzahl))
+
     def _signatur(kennung: UUID) -> str:
         try:
             signaturen.eine(str(kennung))
@@ -232,9 +238,9 @@ def schnittstelle(quelle: Einstellungsquelle, pruefer: KellerwolkePruefer, auftr
         lernlauf.jetzt_laufen(neu.minuten)
         return lernlauf.stand()
 
-    @router.get("/lernlauf/sender", response_model=list[Senderstand])
-    async def lernsender(_app: App) -> list[Senderstand]:
-        return lernlauf.buch.sender()
+    @router.get("/lernlauf/sender", response_model=Senderseite)
+    async def lernsender(_app: App, ab: Annotated[int, Query(ge=0)] = 0, anzahl: Annotated[int, Query(ge=1, le=200)] = 25) -> Senderseite:
+        return lernlauf.buch.sender(ab, anzahl)
 
     @router.put("/lernlauf/sender", response_model=Lernstand)
     async def lernsender_setzen(sender: Annotated[list[Lernsender], Body(max_length=2000)], _app: App) -> Lernstand:
@@ -242,13 +248,13 @@ def schnittstelle(quelle: Einstellungsquelle, pruefer: KellerwolkePruefer, auftr
         lernlauf.buch.sender_setzen(sender)
         return lernlauf.stand()
 
-    @router.put("/lernlauf/sender/{quelle_kennung}", response_model=list[Senderstand])
-    async def lernsender_ausnehmen(quelle_kennung: str, neu: Senderausnahme, _app: App) -> list[Senderstand]:
+    @router.put("/lernlauf/sender/{quelle_kennung}", response_model=Senderstand)
+    async def lernsender_ausnehmen(quelle_kennung: str, neu: Senderausnahme, _app: App) -> Senderstand:
         try:
             lernlauf.buch.ausnehmen(quelle_kennung, neu.aus)
         except KeyError:
             raise HTTPException(404, "Sender unbekannt") from None
-        return lernlauf.buch.sender()
+        return lernlauf.buch.einer(quelle_kennung)
 
     return router
 

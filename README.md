@@ -40,7 +40,9 @@ Schema unter `https://<mac>:<vorne>/openapi.json` (über den Vorbau des Macs). J
 | `GET`, `DELETE /api/v1/stroeme/{id}` | | Stand; beenden (ein stiller Strom endet nach `wiedererkennen.stille_s`) |
 | `GET`, `PUT /api/v1/lernlauf` | `{an, von, bis, gleichzeitig}` | Stand: laufende Sender, nächste, letzte Läufe |
 | `POST /api/v1/lernlauf/jetzt` | `{minuten}` | auch außerhalb des Zeitfensters hören, 0 beendet |
-| `GET`, `PUT /api/v1/lernlauf/sender` | Liste `{quelle, name, adresse, grund, gewicht}` | Sender mit Stunden, Funden, Fehler |
+| `GET /api/v1/signaturen/fach/{pruefen\|wirkt\|verworfen}?ab=0&anzahl=25` | | `{faecher, signaturen}` für die Durchsicht, stückweise |
+| `GET /api/v1/lernlauf/sender?ab=0&anzahl=25` | | `{gesamt, sender}`, stückweise |
+| `PUT /api/v1/lernlauf/sender` | Liste `{quelle, name, adresse, grund, gewicht}` | Stand |
 | `PUT /api/v1/lernlauf/sender/{quelle}` | `{aus}` | einen Sender ausnehmen |
 
 **Auftrag:** `id, app, quelle, zustand` (`wartet`, `laeuft`, `fertig`, `fehler`), `schritt` (was gerade geschieht),
