@@ -102,7 +102,7 @@ class Lernlauf(_Modell):
     an: bool = Field(False, description="im Zeitfenster hören")
     von: str = Field("01:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     bis: str = Field("06:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
-    gleichzeitig: int = Field(4, ge=1, le=12, description="so viele Sender zugleich")
+    gleichzeitig: int = Field(8, ge=1, le=12, description="so viele Sender zugleich")
     sitzung_min: int = Field(45, ge=5, le=240, description="so lange am Stück je Sender")
     kbit_hoechstens: int = Field(192, ge=32, le=1500, description="ein Mitschnitt wird nie größer, als er mit dieser Bitrate wäre")
     archiv_h: float = Field(96.0, ge=1, le=1000, description="so lange zurück wird verglichen")
