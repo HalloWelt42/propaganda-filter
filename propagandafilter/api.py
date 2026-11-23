@@ -11,6 +11,7 @@ from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Query, Req
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from .abschrift import Abschrift
 from .auftraege import Auftragsbuch
 from .einstellungen import Einstellungsquelle
 from .fassung import fassung
@@ -54,7 +55,8 @@ async def _empfangen(request: Request, ziel: Path, grenze: int) -> int:
 
 
 def schnittstelle(quelle: Einstellungsquelle, pruefer: KellerwolkePruefer, auftraege: Auftragsbuch,
-                  vergleicher: Vergleicher, signaturen: Signaturbuch, stroeme: Stroeme, lernlauf: Lernlauf) -> APIRouter:
+                  vergleicher: Vergleicher, signaturen: Signaturbuch, stroeme: Stroeme, lernlauf: Lernlauf,
+                  abschrift: Abschrift) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["filter"])
 
     async def aktuelle_app(anmeldung: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)]) -> AppIdentitaet:
@@ -69,7 +71,8 @@ def schnittstelle(quelle: Einstellungsquelle, pruefer: KellerwolkePruefer, auftr
     async def stand(app: App) -> Stand:
         quelle.aktuell()
         return Stand(dienst="Propaganda-Filter", fassung=fassung(), app=app.app, einstellungen_fehler=quelle.fehler,
-                     auftraege=auftraege.zahlen(), signaturen=signaturen.zahlen(), stroeme=len(stroeme.alle()))
+                     auftraege=auftraege.zahlen(), signaturen=signaturen.zahlen(), stroeme=len(stroeme.alle()),
+                     abschrift=abschrift.eingerichtet, abschrift_fehler=abschrift.fehler)
 
     @router.post("/vergleiche", response_model=Auftrag, status_code=202,
                  openapi_extra={"requestBody": {"required": True, "content": {"application/octet-stream": {

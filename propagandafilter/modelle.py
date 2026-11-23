@@ -64,6 +64,8 @@ class Stand(BaseModel):
     auftraege: dict[Zustand, int]
     signaturen: dict[str, int]
     stroeme: int = 0
+    abschrift: bool = Field(False, description="Stücke werden mitgehört (Leitstelle eingerichtet)")
+    abschrift_fehler: str = ""
 
 
 class Signaturliste(BaseModel):

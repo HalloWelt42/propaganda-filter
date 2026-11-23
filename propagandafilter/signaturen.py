@@ -53,7 +53,7 @@ STUFEN = [
     """
 alter table signaturen add column werbender text not null default '';
 alter table signaturen add column text text not null default '';       -- gesprochener Text, sobald transkribiert
-alter table signaturen add column einschaetzung text not null default '';   -- warum der Text nach Werbung klingt
+alter table signaturen add column einschaetzung text not null default '';   -- wie der Text klingt: werbung, sender, anderes, ohne_sprache, unklar
 alter table signaturen add column abdruck blob;                        -- Zeilen und Abdrücke (int32), gepackt
 create table signatur_quellen (
   signatur text not null references signaturen(id),
@@ -218,11 +218,15 @@ class Signaturbuch:
             raise KeyError(quelle)
         return self.eine(kennung)
 
-    def text_setzen(self, kennung: str, text: str, einschaetzung: str) -> None:
-        self._db.execute("update signaturen set text = ?, einschaetzung = ? where id = ?", (text, einschaetzung, kennung))
+    def text_setzen(self, kennung: str, text: str, einschaetzung: str, werbender: str) -> None:
+        """Abschrift und Einordnung. Ein Werbender, den der Sender selbst genannt hat, bleibt."""
+        self._db.execute("update signaturen set text = ?, einschaetzung = ?, werbender = case when werbender = '' then ? else werbender end"
+                         " where id = ?", (text, einschaetzung, werbender, kennung))
 
-    def ohne_text(self, grenze: int = 20) -> list[Signatur]:
-        return [self.eine(z["id"]) for z in self._db.execute("select id from signaturen where text = '' and urteil = 'offen' order by angelegt desc limit ?", (grenze,))]
+    def ohne_text(self, grenze: int) -> list[Signatur]:
+        """Noch nicht mitgehört, die neuesten zuerst."""
+        return [self.eine(z["id"]) for z in self._db.execute("select id from signaturen where einschaetzung = '' and urteil = 'offen'"
+                                                             " order by angelegt desc limit ?", (grenze,)).fetchall()]
 
     def eine(self, kennung: str) -> Signatur:
         zeile = self._db.execute("select * from signaturen where id = ?", (kennung,)).fetchone()

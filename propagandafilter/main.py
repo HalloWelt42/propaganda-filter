@@ -15,6 +15,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI
 
+from .abschrift import Abschrift
 from .api import fehler_einhaengen, schnittstelle
 from .auftraege import Auftragsbuch
 from .einstellungen import Einstellungsquelle
@@ -34,8 +35,8 @@ def datenordner() -> Path:
 
 
 def app_bauen(daten: Path | None = None, *, kellerwolke: httpx.AsyncBaseTransport | None = None,
-              anbieter: httpx.AsyncBaseTransport | None = None) -> FastAPI:
-    """`kellerwolke` und `anbieter` ersetzen in Tests die Verbindungen zur Kellerwolke und zu Anbietern und Sendern."""
+              anbieter: httpx.AsyncBaseTransport | None = None, leitstelle: httpx.AsyncBaseTransport | None = None) -> FastAPI:
+    """`kellerwolke`, `anbieter` und `leitstelle` ersetzen in Tests die Verbindungen dorthin (Anbieter: auch die Sender)."""
     daten = daten or datenordner()
     daten.mkdir(parents=True, exist_ok=True, mode=0o700)
     quelle = Einstellungsquelle(daten / "einstellungen.toml")
@@ -48,13 +49,16 @@ def app_bauen(daten: Path | None = None, *, kellerwolke: httpx.AsyncBaseTranspor
     stroeme = Stroeme(lambda: quelle.aktuell().wiedererkennen.stroeme_hoechstens, lambda: quelle.aktuell().wiedererkennen.stille_s)
     buch = Lernbuch(daten / "lernlauf")
     lernlauf = Lernlauf(daten / "lernlauf", buch, signaturen, quelle.aktuell, transport=anbieter)
+    abschrift = Abschrift(signaturen, quelle.aktuell, transport=leitstelle)
     auftraege = Auftragsbuch(lambda: quelle.aktuell().grenzen.gleichzeitig,
                              lambda: quelle.aktuell().grenzen.auftraege_behalten_s)
 
     @asynccontextmanager
     async def lebenslauf(_app: FastAPI) -> AsyncIterator[None]:
         lernlauf.starten()
+        abschrift.starten()
         yield
+        await abschrift.schliessen()
         await lernlauf.schliessen()
         await stroeme.schliessen()
         await auftraege.schliessen()
@@ -66,5 +70,5 @@ def app_bauen(daten: Path | None = None, *, kellerwolke: httpx.AsyncBaseTranspor
                   description="Findet Werbung in Ton: vergleicht zwei Fassungen derselben Folge und hebt die "
                               "eingesetzten Stellen als Signaturen auf.")
     fehler_einhaengen(app)
-    app.include_router(schnittstelle(quelle, pruefer, auftraege, vergleicher, signaturen, stroeme, lernlauf))
+    app.include_router(schnittstelle(quelle, pruefer, auftraege, vergleicher, signaturen, stroeme, lernlauf, abschrift))
     return app

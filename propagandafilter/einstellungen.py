@@ -115,7 +115,7 @@ class Leitstelle(_Modell):
 
     adresse: str = Field("https://leitstelle.pi5.lan", pattern=r"^https?://[^\s/]+(:\d+)?/?$")
     schluessel: str = ""
-    hoerdienst: str = Field("klangwerk", max_length=100)
+    hoerdienst: str = Field("klangwerk-hoeren", max_length=100)
     modell: str = Field("", max_length=200, description="Sprachmodell für die Einschätzung; leer: nur Abschrift")
 
 

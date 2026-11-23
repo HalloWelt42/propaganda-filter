@@ -7,16 +7,15 @@ Der Filter fragt selbst nach; was eine App über sich behauptet, zählt nicht. G
 from __future__ import annotations
 
 import hashlib
-import ssl
 import time
 from collections.abc import Callable
-from pathlib import Path
 from uuid import UUID
 
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .einstellungen import KellerwolkeEinstellungen
+from .tls import pruefung
 
 
 class NichtAngemeldet(Exception):
@@ -81,6 +80,8 @@ class KellerwolkePruefer:
             return await self._verbindung(e).get(e.adresse.rstrip("/") + pfad, headers=kopf)
         except httpx.HTTPError as f:
             raise NichtErreichbar(f"Kellerwolke nicht erreichbar: {type(f).__name__}") from f
+        except OSError as f:                       # die Zertifikatsstelle fehlt
+            raise NichtErreichbar(str(f)) from f
 
     @staticmethod
     def _lesen[T: BaseModel](antwort: httpx.Response, modell: type[T]) -> T:
@@ -96,17 +97,8 @@ class KellerwolkePruefer:
         if self._client is None or self._client_fuer != e:
             if self._client is not None:
                 self._abgeloest.append(self._client)  # laufende Anfragen dürfen zu Ende laufen
-            self._client = httpx.AsyncClient(timeout=e.zeitgrenze_s, verify=_pruefung(e.zertifikatsstelle),
+            self._client = httpx.AsyncClient(timeout=e.zeitgrenze_s, verify=pruefung(e.zertifikatsstelle),
                                              transport=self._transport)
             self._client_fuer = e
             self._gemerkt.clear()
         return self._client
-
-
-def _pruefung(stelle: Path | None) -> ssl.SSLContext | bool:
-    if stelle is None:
-        return True
-    datei = stelle.expanduser()
-    if not datei.is_file():
-        raise NichtErreichbar(f"Zertifikatsstelle {datei} fehlt")
-    return ssl.create_default_context(cafile=str(datei))
