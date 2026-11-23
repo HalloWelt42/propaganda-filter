@@ -46,6 +46,7 @@ class Fund:
     punkte: int
     anteil: float
     sicher_ab: float               # Stelle des Tons, an der die Erkennung feststand
+    beginn: float                  # wo der Spot anfing, auch wenn das vor dem Verbinden lag (von beginnt dann dort)
     abgebrochen: bool = False
     verloren: int = 0
 
@@ -148,14 +149,14 @@ class Strom:
             if f.abgebrochen or not (f.von <= null + fenster_ab and fenster_bis <= f.bis):
                 continue
             x = je.get(f.spot)
-            f.verloren = 0 if x and abs(null + fenster_ab + x.beginn - f.von) <= GLEICHER_BEGINN_S else f.verloren + 1
+            f.verloren = 0 if x and abs(null + fenster_ab + x.beginn - f.beginn) <= GLEICHER_BEGINN_S else f.verloren + 1
             if f.verloren >= VERLOREN_FENSTER:
                 f.abgebrochen = True
                 f.bis = max(f.von, fenster_bis - FENSTER_S - (f.verloren - 1) * TAKT_S)
         neu: dict[str, _Verdacht] = {}
         for x in treffer:
             beginn = null + fenster_ab + x.beginn
-            if any(f.spot == x.spot and abs(f.von - max(null, beginn)) <= GLEICHER_BEGINN_S for f in self.funde):
+            if any(f.spot == x.spot and abs(f.beginn - beginn) <= GLEICHER_BEGINN_S for f in self.funde):
                 continue
             vorher = self._verdacht.get(x.spot)
             fest = (x.punkte >= e.punkte_sicher and x.anteil >= e.anteil_sicher) or (
@@ -169,7 +170,7 @@ class Strom:
                 continue
             dauer = v.laengen[v.spots.index(x.spot)]
             # dasselbe Stück Ton steht oft zweimal im Verzeichnis (derselbe Spot von zwei Sendern): eine Stelle genügt
-            fund = Fund(x.spot, max(null, beginn), beginn + dauer, x.punkte, round(x.anteil, 3), fenster_bis)
+            fund = Fund(x.spot, max(null, beginn), beginn + dauer, x.punkte, round(x.anteil, 3), fenster_bis, beginn)
             if any(not f.abgebrochen and f.von - 1 <= fund.von and fund.bis <= f.bis + 1 for f in self.funde):
                 continue
             self.funde.append(fund)
