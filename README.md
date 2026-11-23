@@ -11,6 +11,13 @@ anderen aber fehlt. An einem Werbeplatz laufen oft mehrere Spots; einer davon ka
 gleich sein und fällt erst gegen eine andere auf. Darum zählen alle Vergleiche zusammen, und Spots mit höchstens
 `klang.luecke_hoechstens_s` Abstand bilden einen Werbeplatz.
 
+Weitere Funktionen: **Bekannte Werbung im laufenden Ton wiedererkennen** (die App schickt den Strom eines Senders in
+Stücken, der Filter nennt jeden bekannten Spot wenige Sekunden nach seinem Beginn samt Ende), **Lernlauf** (der Filter hört
+im Zeitfenster selbst Sender aus der Liste der App, sucht über Tage und Sender hinweg, was sich in der Länge eines Spots
+wiederholt, und legt es als Vorschlag ab; der Ton wird danach verworfen) und **Abschrift** (neue Stücke hört die Leitstelle
+mit und ordnet sie ein, das sortiert die Durchsicht). Ein Vorschlag aus dem Lernlauf wirkt erst, wenn ein Mensch ihn
+bestätigt; angekündigte Spots und solche aus Schnitt und Vergleich wirken an ihrem Sender sofort.
+
 ## Vertrag
 
 Schema unter `https://<mac>:<vorne>/openapi.json` (über den Vorbau des Macs). Jede Anfrage trägt
@@ -26,6 +33,15 @@ Schema unter `https://<mac>:<vorne>/openapi.json` (über den Vorbau des Macs). J
 | `GET /api/v1/signaturen?urteil=offen\|bestaetigt\|verworfen&grenze=200` | | `{signaturen: [...]}`, neueste zuerst |
 | `GET /api/v1/signaturen/{id}/ton` | | Ausschnitt als `audio/mp4` |
 | `PUT /api/v1/signaturen/{id}` | `{urteil}` | Signatur mit Urteil |
+| `POST /api/v1/signaturen?quelle=&name=&von=&bis=&herkunft=angabe\|schnitt&werbender=` | Ton als Bytes | 201, Signatur; 200, wenn es den Klang schon gab |
+| `PUT /api/v1/signaturen/{id}/quellen/{quelle}` | `{stand: wirkt\|vorschlag}` | Signatur |
+| `POST /api/v1/stroeme` | `{quelle, name, art: mp3\|aac}` | 201, Strom |
+| `POST /api/v1/stroeme/{id}/ton?ab=<Sekunde>` | das nächste Stück, lückenlos | `{geprueft_bis, stellen: [{signatur, von, bis, wirkt, werbender, ...}]}` |
+| `GET`, `DELETE /api/v1/stroeme/{id}` | | Stand; beenden (ein stiller Strom endet nach `wiedererkennen.stille_s`) |
+| `GET`, `PUT /api/v1/lernlauf` | `{an, von, bis, gleichzeitig}` | Stand: laufende Sender, nächste, letzte Läufe |
+| `POST /api/v1/lernlauf/jetzt` | `{minuten}` | auch außerhalb des Zeitfensters hören, 0 beendet |
+| `GET`, `PUT /api/v1/lernlauf/sender` | Liste `{quelle, name, adresse, grund, gewicht}` | Sender mit Stunden, Funden, Fehler |
+| `PUT /api/v1/lernlauf/sender/{quelle}` | `{aus}` | einen Sender ausnehmen |
 
 **Auftrag:** `id, app, quelle, zustand` (`wartet`, `laeuft`, `fertig`, `fehler`), `schritt` (was gerade geschieht),
 `fortschritt` (0 bis 1), `angelegt, beendet, fehler, ergebnis`. Es rechnen höchstens `grenzen.gleichzeitig` Aufträge
@@ -38,7 +54,8 @@ eine Fassung hat genug gemeinsamen Klang, sonst sind es verschiedene Folgen und 
 nur_in_b}` (Sekunden der jeweiligen Fassung), `hinweis`. Die Zeiten von `nur_in_a` gelten genau für die eingereichte
 Datei.
 
-**Signatur:** `id, quelle, app, herkunft` (`vergleich`), `fassung` (`a` oder `b`), `von_s, bis_s, dauer_s, auftrag,
+**Signatur:** `id, quelle, app, herkunft` (`vergleich`, `angabe`, `schnitt`, `lernlauf`), `werbender, text, einschaetzung`
+(`werbung`, `sender`, `anderes`, `ohne_sprache`, `unklar`), `quellen` (wo sie vorkam, je mit `stand` und Zahl der Treffer), `fassung` (`a` oder `b`), `von_s, bis_s, dauer_s, auftrag,
 angelegt, urteil, beurteilt`. Verworfene bleiben mit ihrem Urteil stehen; gelöscht wird nichts.
 
 ## Verfahren
@@ -47,6 +64,11 @@ Dekodieren (mono, 8 kHz), je 10 ms die Energie in 24 Bändern (log), Fassung A i
 in B per Korrelation suchen (über FFT, erst am erwarteten Versatz, sonst über die ganze Fassung). Die gemeinsamen Läufe
 werden danach auf die Zeile genau begrenzt; dazwischen liegt, was nur in A vorkommt. Beide Richtungen werden gerechnet.
 Das Verfahren steht in `propagandafilter/klang.py`, die Schwellen in den Einstellungen (`[klang]`).
+
+Wiedererkennen: Spitzen im Spektrum, je zwei zu einem Abdruck verbunden, Treffer sammeln sich am selben Versatz
+(`fingerabdruck.py`, `strom.py`, Schwellen in `[wiedererkennen]`). Lernlauf: dieselben Abdrücke, ausgedünnt, über alle
+Aufnahmen der letzten `lernlauf.archiv_h` Stunden (`wiederholung.py`); Lieder fallen an ihrer Länge, an wiederholten Takten
+und am stehenden Titel auf. Die Abschrift braucht in `[leitstelle]` Schlüssel und Modell, ohne ruht sie.
 
 ## Einrichten am Mac
 
@@ -59,7 +81,7 @@ Legt das venv an (Python 3.13), installiert die Pakete, setzt die Git-Hooks und 
 
 Datenordner: `~/Library/Application Support/Propaganda-Filter` (oder `PROPAGANDAFILTER_DATEN`) mit
 `einstellungen.toml` (Vorgaben beim ersten Start; Erlaubnisliste, Kellerwolke, Abruf mit den Kennungen je weiterer
-Fassung, Grenzen, Schwellen, Signaturen), `signaturen/` (Datenbank und Ausschnitte) und `arbeit/` (Dateien laufender Vergleiche, danach entfernt).
+Fassung, Grenzen, Schwellen, Signaturen), `signaturen/` (Datenbank und Ausschnitte), `lernlauf/` (Sender, Läufe, Abdrücke) und `arbeit/` (Dateien laufender Vergleiche, danach entfernt).
 Geänderte Einstellungen gelten ab dem nächsten Auftrag; eine ungültige Fassung wird übergangen, `GET /api/v1/stand`
 nennt den Fehler.
 
