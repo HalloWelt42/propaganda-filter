@@ -117,6 +117,8 @@ class Leitstelle(_Modell):
     schluessel: str = ""
     hoerdienst: str = Field("klangwerk-hoeren", max_length=100)
     modell: str = Field("", max_length=200, description="Sprachmodell für die Einschätzung; leer: nur Abschrift")
+    buendel: int = Field(20, ge=1, le=500, description="so viele Stücke warten, dann wird mitgehört; die Modelle laden so je Bündel einmal")
+    spaetestens_min: float = Field(120.0, ge=1, le=10080, description="länger wartet kein Stück, auch wenn das Bündel nicht voll ist")
 
 
 class Einstellungen(_Modell):

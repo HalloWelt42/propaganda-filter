@@ -97,7 +97,9 @@ def abdruecke_lang(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 class Lernlauf:
     def __init__(self, ordner: Path, buch: Lernbuch, signaturen: Signaturbuch, einstellungen: Callable[[], Einstellungen],
-                 transport: httpx.AsyncBaseTransport | None = None) -> None:
+                 transport: httpx.AsyncBaseTransport | None = None, bei_ende: Callable[[], None] = lambda: None) -> None:
+        """`bei_ende`: ein Lauf ist abgeschlossen und hat alles abgelegt."""
+        self._bei_ende = bei_ende
         self.buch, self.signaturen, self._e, self._transport = buch, signaturen, einstellungen, transport
         self.arbeit = ordner / "arbeit"
         shutil.rmtree(self.arbeit, ignore_errors=True)
@@ -165,6 +167,7 @@ class Lernlauf:
             self.buch.lauf_beenden(self._lauf)
             self.buch.vergessen(self._e().lernlauf.archiv_h)
             self._lauf = None
+            self._bei_ende()
 
     async def _hoeren(self, h: _Horcher, lauf: str) -> None:
         e = self._e().lernlauf

@@ -47,9 +47,9 @@ def app_bauen(daten: Path | None = None, *, kellerwolke: httpx.AsyncBaseTranspor
         Vergleicher.wegraeumen_ordner(rest)
     vergleicher = Vergleicher(arbeit, signaturen, quelle.aktuell, transport=anbieter)
     stroeme = Stroeme(lambda: quelle.aktuell().wiedererkennen.stroeme_hoechstens, lambda: quelle.aktuell().wiedererkennen.stille_s)
-    buch = Lernbuch(daten / "lernlauf")
-    lernlauf = Lernlauf(daten / "lernlauf", buch, signaturen, quelle.aktuell, transport=anbieter)
     abschrift = Abschrift(signaturen, quelle.aktuell, transport=leitstelle)
+    buch = Lernbuch(daten / "lernlauf")
+    lernlauf = Lernlauf(daten / "lernlauf", buch, signaturen, quelle.aktuell, transport=anbieter, bei_ende=abschrift.anstossen)
     auftraege = Auftragsbuch(lambda: quelle.aktuell().grenzen.gleichzeitig,
                              lambda: quelle.aktuell().grenzen.auftraege_behalten_s)
 

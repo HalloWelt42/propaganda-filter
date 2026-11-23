@@ -234,8 +234,8 @@ class Signaturbuch:
         self._db.execute("update signaturen set text = ?, einschaetzung = ?, werbender = case when werbender = '' then ? else werbender end"
                          " where id = ?", (text, einschaetzung, werbender, kennung))
 
-    def ohne_text(self, grenze: int) -> list[Signatur]:
-        """Noch nicht mitgehört, die neuesten zuerst."""
+    def ohne_einordnung(self, grenze: int) -> list[Signatur]:
+        """Noch nicht eingeordnet (ohne oder schon mit Abschrift), die neuesten zuerst."""
         return [self.eine(z["id"]) for z in self._db.execute("select id from signaturen where einschaetzung = '' and urteil = 'offen'"
                                                              " order by angelegt desc limit ?", (grenze,)).fetchall()]
 
