@@ -1,21 +1,24 @@
 """HTTP-Schnittstelle /api/v1 für die Apps (Vertrag in README.md, Schema unter /openapi.json). Übersetzt nur; wer
 fragen darf, entscheiden Kellerwolke und Erlaubnisliste, was gerechnet wird, Vergleicher und Auftragsbuch."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .auftraege import Auftragsbuch
 from .einstellungen import Einstellungsquelle
 from .fassung import fassung
+from .klang import KlangFehler
 from .kellerwolke import AppIdentitaet, KellerwolkePruefer, NichtAngemeldet, NichtErreichbar
-from .modelle import Auftrag, Beurteilung, Signaturliste, Stand
-from .signaturen import ENDUNG, Signatur, Signaturbuch, Urteil
+from .modelle import Auftrag, Beurteilung, NeuerStrom, Quellenstand, Signaturliste, Spotstelle, Stand, Stromstand
+from .signaturen import ENDUNG, Signatur, SignaturFehler, Signaturbuch, Urteil
+from .strom import Fund, Strom, StromFehler, Stroeme
 from .vergleich import Vergleicher
 
 _bearer = HTTPBearer(auto_error=False, description="App-Schlüssel der Kellerwolke")
@@ -47,7 +50,7 @@ async def _empfangen(request: Request, ziel: Path, grenze: int) -> int:
 
 
 def schnittstelle(quelle: Einstellungsquelle, pruefer: KellerwolkePruefer, auftraege: Auftragsbuch,
-                  vergleicher: Vergleicher, signaturen: Signaturbuch) -> APIRouter:
+                  vergleicher: Vergleicher, signaturen: Signaturbuch, stroeme: Stroeme) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["filter"])
 
     async def aktuelle_app(anmeldung: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)]) -> AppIdentitaet:
@@ -62,7 +65,7 @@ def schnittstelle(quelle: Einstellungsquelle, pruefer: KellerwolkePruefer, auftr
     async def stand(app: App) -> Stand:
         quelle.aktuell()
         return Stand(dienst="Propaganda-Filter", fassung=fassung(), app=app.app, einstellungen_fehler=quelle.fehler,
-                     auftraege=auftraege.zahlen(), signaturen=signaturen.zahlen())
+                     auftraege=auftraege.zahlen(), signaturen=signaturen.zahlen(), stroeme=len(stroeme.alle()))
 
     @router.post("/vergleiche", response_model=Auftrag, status_code=202,
                  openapi_extra={"requestBody": {"required": True, "content": {"application/octet-stream": {
@@ -91,6 +94,95 @@ def schnittstelle(quelle: Einstellungsquelle, pruefer: KellerwolkePruefer, auftr
             return auftraege.holen(str(auftrag_id), app.app)
         except KeyError:
             raise HTTPException(404, "Auftrag unbekannt oder abgelaufen") from None
+
+    def gefunden(strom: Strom, fund: Fund) -> None:
+        signaturen.treffer(fund.spot, strom.quelle, strom.name)
+
+    def _stand(s: Strom) -> Stromstand:
+        ueberall = quelle.aktuell().wiedererkennen.ueberall
+        stellen = [Spotstelle(signatur=f.spot, von=round(f.von, 2), bis=round(f.bis, 2), sicher_ab=round(f.sicher_ab, 2),
+                              wirkt=signaturen.wirkt(f.spot, s.quelle, ueberall), werbender=signaturen.eine(f.spot).werbender,
+                              abgebrochen=f.abgebrochen) for f in s.funde]
+        return Stromstand(id=s.id, quelle=s.quelle, geprueft_bis=round(s.geprueft_bis, 2), stellen=stellen)
+
+    def _strom(kennung: UUID, app: AppIdentitaet) -> Strom:
+        try:
+            return stroeme.holen(str(kennung), app.app)
+        except KeyError:
+            raise HTTPException(404, "Strom unbekannt oder beendet") from None
+
+    @router.post("/stroeme", response_model=Stromstand, status_code=201)
+    async def strom_anlegen(neu: NeuerStrom, app: App) -> Stromstand:
+        """Einen laufenden Strom auf bekannte Spots prüfen; der Ton folgt in Stücken unter /stroeme/{id}/ton."""
+        s = Strom(app=app.app, quelle=neu.quelle, name=neu.name, art=neu.art, einstellungen=lambda: quelle.aktuell().wiedererkennen,
+                  verzeichnis=signaturen.verzeichnis, bei_fund=gefunden)
+        try:
+            return _stand(await stroeme.anlegen(s))
+        except StromFehler as f:
+            raise HTTPException(503, str(f)) from f
+
+    @router.post("/stroeme/{strom_id}/ton", response_model=Stromstand,
+                 openapi_extra={"requestBody": {"required": True, "content": {"application/octet-stream": {
+                     "schema": {"type": "string", "format": "binary"}}}}})
+    async def strom_ton(strom_id: UUID, request: Request, app: App, ab: Annotated[float, Query(ge=0)]) -> Stromstand:
+        """Das nächste Stück Ton, lückenlos, so wie es vom Sender kommt; `ab` zählt nur beim ersten. Antwort: bis wohin geprüft
+        ist und welche Spots der Strom enthält."""
+        s = _strom(strom_id, app)
+        try:
+            await s.nehmen(await request.body(), ab)
+        except StromFehler as f:
+            await stroeme.beenden(s.id)
+            raise HTTPException(422, str(f)) from f
+        return _stand(s)
+
+    @router.get("/stroeme/{strom_id}", response_model=Stromstand)
+    async def strom_stand(strom_id: UUID, app: App) -> Stromstand:
+        return _stand(_strom(strom_id, app))
+
+    @router.delete("/stroeme/{strom_id}", status_code=204)
+    async def strom_beenden(strom_id: UUID, app: App) -> None:
+        await stroeme.beenden(_strom(strom_id, app).id)
+
+    @router.post("/signaturen", response_model=Signatur, status_code=201,
+                 responses={200: {"model": Signatur, "description": "gab es schon (gleicher Klang)"}},
+                 openapi_extra={"requestBody": {"required": True, "content": {"application/octet-stream": {
+                     "schema": {"type": "string", "format": "binary"}}}}})
+    async def signatur_anlegen(request: Request, app: App, antwort: Response,
+                               quelle_kennung: Annotated[str, Query(alias="quelle", min_length=1, max_length=200)],
+                               name: Annotated[str, Query(max_length=300)],
+                               von: Annotated[float, Query(ge=0)], bis: Annotated[float, Query(gt=0)],
+                               herkunft: Literal["angabe", "schnitt"], werbender: Annotated[str, Query(max_length=200)] = "") -> Signatur:
+        """Bekannte Werbung als Signatur: angekündigt (Sendedaten) oder im Schnitt markiert. Körper ist der Ton, [von, bis) die
+        Werbung darin in Sekunden. Gibt es denselben Klang schon, kommt nur die Quelle dazu."""
+        e = quelle.aktuell()
+        if not e.signaturen.dauer_mindestens_s <= bis - von <= e.signaturen.dauer_hoechstens_s:
+            raise HTTPException(422, f"Werbung muss {e.signaturen.dauer_mindestens_s:g} bis {e.signaturen.dauer_hoechstens_s:g} Sekunden lang sein")
+        kennung = str(uuid4())
+        ordner = vergleicher.ordner(kennung)
+        try:
+            ton = ordner / "ton"
+            await _empfangen(request, ton, e.grenzen.groesse_mb * 1024 * 1024)
+            vorhanden = await asyncio.to_thread(signaturen.gleiche, ton, (von, bis), e.wiedererkennen)
+            if vorhanden:
+                signaturen.treffer(vorhanden, quelle_kennung, name)
+                if signaturen.eine(vorhanden).urteil != "verworfen":
+                    signaturen.quelle_setzen(vorhanden, quelle_kennung, "wirkt")      # hier angekündigt, also hier Werbung
+                antwort.status_code = 200
+                return signaturen.eine(vorhanden)
+            return await asyncio.to_thread(signaturen.aufnehmen, ton, von, bis, quelle=name, app=app.app, herkunft=herkunft,
+                                           fassung="", auftrag="", werbender=werbender, quelle_kennung=quelle_kennung)
+        except (SignaturFehler, KlangFehler) as f:
+            raise HTTPException(422, str(f)) from f
+        finally:
+            vergleicher.wegraeumen(kennung)
+
+    @router.put("/signaturen/{signatur_id}/quellen/{quelle_kennung}", response_model=Signatur)
+    async def quelle_setzen(signatur_id: UUID, quelle_kennung: str, neu: Quellenstand, _app: App) -> Signatur:
+        """Einen Vorschlag für eine Quelle annehmen (wirkt) oder zurücknehmen (vorschlag)."""
+        try:
+            return signaturen.quelle_setzen(_signatur(signatur_id), quelle_kennung, neu.stand)
+        except KeyError:
+            raise HTTPException(404, "Quelle unbekannt") from None
 
     @router.get("/signaturen", response_model=Signaturliste)
     async def liste(_app: App, urteil: Urteil | None = None,

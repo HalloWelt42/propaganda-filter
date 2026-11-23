@@ -63,10 +63,40 @@ class Stand(BaseModel):
     einstellungen_fehler: str | None
     auftraege: dict[Zustand, int]
     signaturen: dict[str, int]
+    stroeme: int = 0
 
 
 class Signaturliste(BaseModel):
     signaturen: list[Signatur]
+
+
+class NeuerStrom(BaseModel):
+    quelle: str = Field(min_length=1, max_length=200, description="Kennung der Quelle bei der App, etwa die uuid des Senders")
+    name: str = Field("", max_length=300)
+    art: Literal["mp3", "aac"]
+
+
+class Spotstelle(BaseModel):
+    """Ein bekannter Spot im Strom (Sekunden des Stroms)."""
+
+    signatur: str
+    von: float
+    bis: float
+    wirkt: bool = Field(description="hier überspringen oder stummschalten; sonst nur ein Vorschlag")
+    werbender: str = ""
+    sicher_ab: float = Field(description="Stelle des Tons, an der die Erkennung feststand")
+    abgebrochen: bool = False
+
+
+class Stromstand(BaseModel):
+    id: str
+    quelle: str
+    geprueft_bis: float = Field(description="bis hier ist der Ton geprüft")
+    stellen: list[Spotstelle]
+
+
+class Quellenstand(BaseModel):
+    stand: Literal["wirkt", "vorschlag"]
 
 
 class Beurteilung(BaseModel):

@@ -21,6 +21,7 @@ from .einstellungen import Einstellungsquelle
 from .fassung import fassung
 from .kellerwolke import KellerwolkePruefer
 from .signaturen import Signaturbuch
+from .strom import Stroeme
 from .vergleich import Vergleicher
 
 VORGABE_DATEN = Path("~/Library/Application Support/Propaganda-Filter")
@@ -42,12 +43,14 @@ def app_bauen(daten: Path | None = None, *, kellerwolke: httpx.AsyncBaseTranspor
     for rest in arbeit.glob("*"):  # Arbeitsdateien abgebrochener Aufträge (Aufträge überleben keinen Neustart)
         Vergleicher.wegraeumen_ordner(rest)
     vergleicher = Vergleicher(arbeit, signaturen, quelle.aktuell, transport=anbieter)
+    stroeme = Stroeme(lambda: quelle.aktuell().wiedererkennen.stroeme_hoechstens, lambda: quelle.aktuell().wiedererkennen.stille_s)
     auftraege = Auftragsbuch(lambda: quelle.aktuell().grenzen.gleichzeitig,
                              lambda: quelle.aktuell().grenzen.auftraege_behalten_s)
 
     @asynccontextmanager
     async def lebenslauf(_app: FastAPI) -> AsyncIterator[None]:
         yield
+        await stroeme.schliessen()
         await auftraege.schliessen()
         await pruefer.schliessen()
         signaturen.schliessen()
@@ -56,5 +59,5 @@ def app_bauen(daten: Path | None = None, *, kellerwolke: httpx.AsyncBaseTranspor
                   description="Findet Werbung in Ton: vergleicht zwei Fassungen derselben Folge und hebt die "
                               "eingesetzten Stellen als Signaturen auf.")
     fehler_einhaengen(app)
-    app.include_router(schnittstelle(quelle, pruefer, auftraege, vergleicher, signaturen))
+    app.include_router(schnittstelle(quelle, pruefer, auftraege, vergleicher, signaturen, stroeme))
     return app

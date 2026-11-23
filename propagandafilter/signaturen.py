@@ -1,4 +1,5 @@
-"""Signaturen: Ausschnitte von Stellen, die ein Vergleich als eingesetzt gefunden hat (nur in einer Fassung).
+"""Signaturen: bekannte Werbung als Ausschnitt mit Klang-Fingerabdruck. Sie kommen aus dem Vergleich zweier Fassungen, aus
+angekündigten Spots (Sendedaten), aus dem Schnitt und aus dem Lernlauf.
 
 Jede Signatur ist eine kurze Tondatei im Datenordner und eine Zeile in signaturen.db. Ein Mensch kann sie anhören und
 bestätigen oder verwerfen (Irrtümer herausfiltern); verworfene bleiben mit ihrem Urteil stehen, damit derselbe Irrtum
@@ -10,13 +11,23 @@ from __future__ import annotations
 import sqlite3
 import subprocess
 import uuid
+import zlib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 from pydantic import BaseModel
 
+from .einstellungen import Wiedererkennen
+from .fingerabdruck import RATE, Verzeichnis, abdruecke
+from .klang import KlangFehler, dekodieren
+
 Urteil = Literal["offen", "bestaetigt", "verworfen"]
+Stand = Literal["wirkt", "vorschlag"]
+
+#: aus diesen Herkünften wirkt eine Signatur in ihrer eigenen Quelle, auch bevor ein Mensch sie bestätigt
+SOFORT = frozenset({"vergleich", "angabe", "schnitt"})
 
 SCHEMA = """
 create table if not exists signaturen (
@@ -37,7 +48,39 @@ create table if not exists signaturen (
 create index if not exists signaturen_urteil on signaturen(urteil, angelegt);
 """
 
+# Stufen nach der ersten Fassung, der Reihe nach; der Stand steht in user_version
+STUFEN = [
+    """
+alter table signaturen add column werbender text not null default '';
+alter table signaturen add column text text not null default '';       -- gesprochener Text, sobald transkribiert
+alter table signaturen add column einschaetzung text not null default '';   -- warum der Text nach Werbung klingt
+alter table signaturen add column abdruck blob;                        -- Zeilen und Abdrücke (int32), gepackt
+create table signatur_quellen (
+  signatur text not null references signaturen(id),
+  quelle text not null,                  -- Kennung der Quelle bei der App (Sender, Podcast)
+  name text not null,
+  stand text not null,                   -- 'wirkt' oder 'vorschlag'
+  treffer integer not null default 0,
+  zuerst text not null,
+  zuletzt text not null,
+  primary key (signatur, quelle)
+);
+create index signatur_quellen_quelle on signatur_quellen(quelle);
+""",
+]
+
 ENDUNG = ".m4a"
+
+
+class Quelle(BaseModel):
+    """Wo eine Signatur vorkam und ob sie dort wirkt."""
+
+    quelle: str
+    name: str
+    stand: Stand
+    treffer: int
+    zuerst: str
+    zuletzt: str
 
 
 class Signatur(BaseModel):
@@ -53,10 +96,23 @@ class Signatur(BaseModel):
     angelegt: str
     urteil: Urteil
     beurteilt: str | None
+    werbender: str = ""
+    text: str = ""
+    einschaetzung: str = ""
+    quellen: list[Quelle] = []
 
 
 class SignaturFehler(Exception):
     pass
+
+
+def _packen(h: np.ndarray, t: np.ndarray) -> bytes:
+    return zlib.compress(np.stack([h, t]).astype(np.int32).tobytes(), 6)
+
+
+def _auspacken(daten: bytes) -> tuple[np.ndarray, np.ndarray]:
+    beide = np.frombuffer(zlib.decompress(daten), np.int32).reshape(2, -1).astype(np.int64)
+    return beide[0], beide[1]
 
 
 def _jetzt() -> str:
@@ -72,13 +128,21 @@ class Signaturbuch:
         self._db.row_factory = sqlite3.Row
         self._db.execute("pragma journal_mode=wal")
         self._db.executescript(SCHEMA)
+        self._stufen()
+        self._verzeichnis: Verzeichnis | None = None
+
+    def _stufen(self) -> None:
+        stand = self._db.execute("pragma user_version").fetchone()[0]
+        for nummer, stufe in enumerate(STUFEN[stand:], stand + 1):
+            self._db.executescript(f"begin;{stufe}pragma user_version = {nummer};commit;")
 
     def schliessen(self) -> None:
         self._db.close()
 
     def aufnehmen(self, ton: Path, von: float, bis: float, *, quelle: str, app: str, herkunft: str, fassung: str,
-                  auftrag: str) -> Signatur:
-        """Den Ausschnitt [von, bis) aus der Tondatei schneiden und als offene Signatur ablegen."""
+                  auftrag: str, werbender: str = "", quelle_kennung: str = "") -> Signatur:
+        """Den Ausschnitt [von, bis) aus der Tondatei schneiden und als offene Signatur ablegen. `quelle_kennung`: in dieser
+        Quelle kommt sie vor (Kennung bei der App)."""
         kennung = str(uuid.uuid4())
         datei = f"{kennung}{ENDUNG}"
         ziel = self.ton / datei
@@ -88,16 +152,86 @@ class Signaturbuch:
             ziel.unlink(missing_ok=True)
             raise SignaturFehler(f"Ausschnitt nicht schneidbar: {r.stderr.decode(errors='replace').strip()[:300]}")
         self._db.execute(
-            "insert into signaturen (id, quelle, app, herkunft, fassung, von_s, bis_s, dauer_s, datei, auftrag, angelegt)"
-            " values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (kennung, quelle, app, herkunft, fassung, von, bis, round(bis - von, 2), datei, auftrag, _jetzt()))
+            "insert into signaturen (id, quelle, app, herkunft, fassung, von_s, bis_s, dauer_s, datei, auftrag, angelegt,"
+            " werbender, abdruck) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (kennung, quelle, app, herkunft, fassung, von, bis, round(bis - von, 2), datei, auftrag, _jetzt(), werbender,
+             _packen(*abdruecke(dekodieren(ziel)))))
+        if quelle_kennung:
+            self._db.execute("insert into signatur_quellen (signatur, quelle, name, stand, treffer, zuerst, zuletzt)"
+                             " values (?, ?, ?, ?, 0, ?, ?)",
+                             (kennung, quelle_kennung, quelle, "wirkt" if herkunft in SOFORT else "vorschlag", _jetzt(), _jetzt()))
+        self._verzeichnis = None
         return self.eine(kennung)
+
+    def gleiche(self, ton: Path, wo: tuple[float, float], e: Wiedererkennen) -> str | None:
+        """Kennung einer vorhandenen Signatur mit demselben Klang und etwa derselben Länge (auch einer verworfenen: ein Irrtum
+        soll nicht neu erscheinen), sonst None."""
+        x = dekodieren(ton)[int(wo[0] * RATE):int(wo[1] * RATE)]
+        dauer, n = len(x) / RATE, int(4 * RATE)
+        mitte = max(0, len(x) // 2 - n // 2)
+        h, t = abdruecke(x[mitte:mitte + n])
+        v = self.verzeichnis(alle=True)
+        for treffer in v.suchen(h, t, mindestens=e.punkte_sicher, anteil=e.anteil_sicher):
+            if abs(v.laengen[v.spots.index(treffer.spot)] - dauer) <= max(1.5, 0.12 * dauer):
+                return treffer.spot
+        return None
+
+    def verzeichnis(self, alle: bool = False) -> Verzeichnis:
+        """Alle Signaturen zum Nachschlagen; verworfene nur mit `alle`. Wird erst neu gebaut, wenn sich etwas ändert."""
+        if not alle and self._verzeichnis is not None:
+            return self._verzeichnis
+        zeilen = self._db.execute("select id, dauer_s, datei, abdruck from signaturen" + ("" if alle else " where urteil != 'verworfen'")).fetchall()
+        spots = []
+        for z in zeilen:
+            packen = z["abdruck"]
+            if packen is None:                    # vor dem Fingerabdruck aufgenommen: einmal nachholen
+                try:
+                    packen = _packen(*abdruecke(dekodieren(self.ton / z["datei"])))
+                except KlangFehler:
+                    continue
+                self._db.execute("update signaturen set abdruck = ? where id = ?", (packen, z["id"]))
+            spots.append((z["id"], *_auspacken(packen), z["dauer_s"]))
+        v = Verzeichnis.aus(spots)
+        if not alle:
+            self._verzeichnis = v
+        return v
+
+    def treffer(self, kennung: str, quelle: str, name: str) -> Stand:
+        """Die Signatur kam in dieser Quelle vor; liefert, ob sie dort wirkt. Eine neue Quelle ist erst ein Vorschlag."""
+        jetzt = _jetzt()
+        self._db.execute("insert into signatur_quellen (signatur, quelle, name, stand, treffer, zuerst, zuletzt)"
+                         " values (?, ?, ?, 'vorschlag', 1, ?, ?) on conflict (signatur, quelle) do update set"
+                         " treffer = treffer + 1, zuletzt = excluded.zuletzt, name = excluded.name", (kennung, quelle, name, jetzt, jetzt))
+        return self._db.execute("select stand from signatur_quellen where signatur = ? and quelle = ?", (kennung, quelle)).fetchone()["stand"]
+
+    def wirkt(self, kennung: str, quelle: str, ueberall: bool) -> bool:
+        """Wirkt die Signatur in dieser Quelle (dort wird übersprungen oder stummgeschaltet)?"""
+        s = self.eine(kennung)
+        if s.urteil == "verworfen":
+            return False
+        if s.urteil == "bestaetigt" and ueberall:
+            return True
+        return any(q.quelle == quelle and q.stand == "wirkt" for q in s.quellen) and (s.urteil == "bestaetigt" or s.herkunft in SOFORT)
+
+    def quelle_setzen(self, kennung: str, quelle: str, stand: Stand) -> Signatur:
+        if self._db.execute("update signatur_quellen set stand = ? where signatur = ? and quelle = ?", (stand, kennung, quelle)).rowcount == 0:
+            raise KeyError(quelle)
+        return self.eine(kennung)
+
+    def text_setzen(self, kennung: str, text: str, einschaetzung: str) -> None:
+        self._db.execute("update signaturen set text = ?, einschaetzung = ? where id = ?", (text, einschaetzung, kennung))
+
+    def ohne_text(self, grenze: int = 20) -> list[Signatur]:
+        return [self.eine(z["id"]) for z in self._db.execute("select id from signaturen where text = '' and urteil = 'offen' order by angelegt desc limit ?", (grenze,))]
 
     def eine(self, kennung: str) -> Signatur:
         zeile = self._db.execute("select * from signaturen where id = ?", (kennung,)).fetchone()
         if zeile is None:
             raise KeyError(kennung)
-        return Signatur.model_validate({k: zeile[k] for k in zeile.keys() if k != "datei"})
+        quellen = self._db.execute("select quelle, name, stand, treffer, zuerst, zuletzt from signatur_quellen where signatur = ?"
+                                   " order by treffer desc, name", (kennung,)).fetchall()
+        return Signatur.model_validate({**{k: zeile[k] for k in zeile.keys() if k not in ("datei", "abdruck")},
+                                        "quellen": [dict(q) for q in quellen]})
 
     def liste(self, urteil: Urteil | None = None, grenze: int = 200) -> list[Signatur]:
         sql = "select id from signaturen" + (" where urteil = ?" if urteil else "") + " order by angelegt desc limit ?"
@@ -120,4 +254,7 @@ class Signaturbuch:
         self.eine(kennung)
         self._db.execute("update signaturen set urteil = ?, beurteilt = ? where id = ?",
                          (urteil, None if urteil == "offen" else _jetzt(), kennung))
+        if urteil == "bestaetigt":                      # bestätigt heißt: in den Quellen, in denen sie schon auffiel, wirkt sie
+            self._db.execute("update signatur_quellen set stand = 'wirkt' where signatur = ?", (kennung,))
+        self._verzeichnis = None
         return self.eine(kennung)

@@ -83,6 +83,19 @@ class Signaturen(_Modell):
     dauer_hoechstens_s: float = Field(300.0, ge=1, le=3600, description="längere Stellen sind eher geänderte Inhalte als Werbung")
 
 
+class Wiedererkennen(_Modell):
+    """Schwellen des Klang-Fingerabdrucks im laufenden Strom (gemessen 23.11.2026: Zufall höchstens 13 Punkte und 2 Prozent,
+    echte Treffer im schwächsten Prozent 83 Punkte und 11 Prozent, je Fenster von 4 s)."""
+
+    punkte_verdacht: int = Field(30, ge=10, le=1000, description="zwei solche Fenster nacheinander mit demselben Beginn genügen")
+    anteil_verdacht: float = Field(0.04, gt=0, lt=1)
+    punkte_sicher: int = Field(60, ge=10, le=1000, description="schon ein Fenster genügt")
+    anteil_sicher: float = Field(0.08, gt=0, lt=1)
+    ueberall: bool = Field(False, description="bestätigte Signaturen wirken bei jedem Sender; aus: woanders nur als Vorschlag")
+    stroeme_hoechstens: int = Field(16, ge=1, le=200)
+    stille_s: float = Field(120.0, ge=10, le=3600, description="ein Strom, der so lange nichts schickt, ist beendet")
+
+
 class Einstellungen(_Modell):
     erlaubte_apps: list[str] = Field(default_factory=lambda: ["radiohub"])
     kellerwolke: KellerwolkeEinstellungen = Field(default_factory=KellerwolkeEinstellungen)
@@ -90,6 +103,7 @@ class Einstellungen(_Modell):
     grenzen: Grenzen = Field(default_factory=Grenzen)
     klang: Klang = Field(default_factory=Klang)
     signaturen: Signaturen = Field(default_factory=Signaturen)
+    wiedererkennen: Wiedererkennen = Field(default_factory=Wiedererkennen)
 
     @model_validator(mode="after")
     def _pruefen(self) -> Einstellungen:
