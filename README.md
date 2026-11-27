@@ -15,8 +15,10 @@ Weitere Funktionen: **Bekannte Werbung im laufenden Ton wiedererkennen** (die Ap
 Stücken, der Filter nennt jeden bekannten Spot wenige Sekunden nach seinem Beginn samt Ende), **Lernlauf** (der Filter hört
 im Zeitfenster selbst Sender aus der Liste der App, sucht über Tage und Sender hinweg, was sich in der Länge eines Spots
 wiederholt, und legt es als Vorschlag ab; der Ton wird danach verworfen) und **Abschrift** (neue Stücke hört die Leitstelle
-mit und ordnet sie ein, das sortiert die Durchsicht). Ein Vorschlag aus dem Lernlauf wirkt erst, wenn ein Mensch ihn
-bestätigt; angekündigte Spots und solche aus Schnitt und Vergleich wirken an ihrem Sender sofort.
+mit und ordnet sie ein, das sortiert die Durchsicht). Ein Vorschlag aus dem Lernlauf wirkt, sobald ein Mensch ihn
+bestätigt oder die Einordnung sicher ist: Werbung mit erkanntem Werbenden gibt der Filter selbst frei (`[freigabe]`), unsichere
+bleiben zur Durchsicht, und ein Mensch kann jede Signatur jederzeit verwerfen. Angekündigte Spots und solche aus Schnitt und
+Vergleich wirken an ihrem Sender sofort. Bestätigte wirken bei jedem Sender (`wiedererkennen.ueberall`).
 
 ## Vertrag
 
@@ -58,7 +60,7 @@ Datei.
 
 **Signatur:** `id, quelle, app, herkunft` (`vergleich`, `angabe`, `schnitt`, `lernlauf`), `werbender, text, einschaetzung`
 (`werbung`, `sender`, `anderes`, `ohne_sprache`, `unklar`), `quellen` (wo sie vorkam, je mit `stand` und Zahl der Treffer), `fassung` (`a` oder `b`), `von_s, bis_s, dauer_s, auftrag,
-angelegt, urteil, beurteilt`. Verworfene bleiben mit ihrem Urteil stehen; gelöscht wird nichts.
+angelegt, urteil, beurteilt, beurteilt_von` (`mensch`, `selbst` nach der Regel der Freigabe, leer solange offen). Verworfene bleiben mit ihrem Urteil stehen; gelöscht wird nichts.
 
 ## Verfahren
 
@@ -86,6 +88,13 @@ Datenordner: `~/Library/Application Support/Propaganda-Filter` (oder `PROPAGANDA
 Fassung, Grenzen, Schwellen, Signaturen), `signaturen/` (Datenbank und Ausschnitte), `lernlauf/` (Sender, Läufe, Abdrücke) und `arbeit/` (Dateien laufender Vergleiche, danach entfernt).
 Geänderte Einstellungen gelten ab dem nächsten Auftrag; eine ungültige Fassung wird übergangen, `GET /api/v1/stand`
 nennt den Fehler.
+
+Offene Signaturen von vor der Regel der Freigabe einmalig nachbewerten (erst Vorschau, dann mit `--anwenden`):
+
+```bash
+.venv/bin/python -m propagandafilter.nachbewerten
+.venv/bin/python -m propagandafilter.nachbewerten --anwenden
+```
 
 Prüfen:
 

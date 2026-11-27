@@ -8,6 +8,7 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import tomli_w
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_serializer, field_validator, model_validator
@@ -91,9 +92,23 @@ class Wiedererkennen(_Modell):
     anteil_verdacht: float = Field(0.04, gt=0, lt=1)
     punkte_sicher: int = Field(60, ge=10, le=1000, description="schon ein Fenster genügt")
     anteil_sicher: float = Field(0.08, gt=0, lt=1)
-    ueberall: bool = Field(False, description="bestätigte Signaturen wirken bei jedem Sender; aus: woanders nur als Vorschlag")
+    ueberall: bool = Field(True, description="bestätigte Signaturen (auch selbst freigegebene) wirken bei jedem Sender; aus: woanders "
+                                             "nur als Vorschlag")
     stroeme_hoechstens: int = Field(16, ge=1, le=200)
     stille_s: float = Field(120.0, ge=10, le=3600, description="ein Strom, der so lange nichts schickt, ist beendet")
+
+
+Herkunft = Literal["vergleich", "angabe", "schnitt", "lernlauf"]
+
+
+class Freigabe(_Modell):
+    """Wann eine offene Signatur ohne Menschen als bestätigt gilt (RAD-154): die Einordnung nennt sie Werbung und hat den
+    Werbenden erkannt. Unsichere Funde bleiben Vorschlag zur Durchsicht, verworfene bleiben verworfen; ein Mensch kann jede
+    Signatur jederzeit verwerfen. Die Regel selbst steht in signaturen.py (`sicherer_fund`)."""
+
+    selbst_bei_sicherem_fund: bool = Field(True, description="sicher eingeordnete Werbung mit Werbendem wirkt sofort, ohne Durchsicht")
+    herkuenfte: list[Herkunft] = Field(default_factory=lambda: ["lernlauf"],
+                                       description="für Signaturen dieser Herkunft gilt die Regel")
 
 
 class Lernlauf(_Modell):
@@ -129,6 +144,7 @@ class Einstellungen(_Modell):
     klang: Klang = Field(default_factory=Klang)
     signaturen: Signaturen = Field(default_factory=Signaturen)
     wiedererkennen: Wiedererkennen = Field(default_factory=Wiedererkennen)
+    freigabe: Freigabe = Field(default_factory=Freigabe)
     lernlauf: Lernlauf = Field(default_factory=Lernlauf)
     leitstelle: Leitstelle = Field(default_factory=Leitstelle)
 

@@ -1,5 +1,6 @@
 """Kandidaten mithören (HELF-256): was wird gesprochen, und klingt es nach Werbung? Beides rechnet die Leitstelle, immer als
-Hintergrundarbeit. Es ordnet nur die Durchsicht; ob etwas wirkt, entscheidet weiter der Mensch.
+Hintergrundarbeit. Es ordnet die Durchsicht; ist die Einordnung sicher (Werbung mit erkanntem Werbenden), gibt die Regel der
+Freigabe die Signatur selbst frei (RAD-154, `[freigabe]`), sonst entscheidet der Mensch.
 
 Gearbeitet wird in Bündeln (HELF-265): erst wenn genug wartet, etwas lange genug wartet oder ein Lernlauf zu Ende ist. Dann wird
 erst alles gehört und danach alles eingeordnet, ohne Pause dazwischen. So lädt die Leitstelle das Sprachmodell je Bündel einmal,
@@ -107,6 +108,8 @@ class Abschrift:
                         if text:
                             art, werbender = await self._einordnen(ls, e.leitstelle.modell, text)
                             self.signaturen.text_setzen(kennung, text, art, werbender)
+                            if self.signaturen.selbst_freigeben(kennung, e.freigabe):
+                                log.info("Signatur %s selbst freigegeben (%s)", kennung, self.signaturen.eine(kennung).werbender)
         finally:
             LAUFENDE_ARBEIT.reset(arbeit)
 

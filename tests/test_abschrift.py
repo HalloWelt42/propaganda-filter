@@ -32,13 +32,13 @@ def buch(ordner: Path, werbender: str = "") -> tuple[Signaturbuch, str]:
     return b, b.aufnehmen(ton, 1, 11, quelle="Sender", app="", herkunft="lernlauf", fassung="", auftrag="", werbender=werbender).id
 
 
-@pytest.mark.parametrize("text,art,modell,erwartet", [
-    ("Jetzt neu bei Musterfirma, nur solange der Vorrat reicht", "werbung", "m", ("werbung", "Musterfirma")),
-    ("Sie hören den besten Mix für das ganze Land", "sender", "m", ("sender", "")),
-    ("Jetzt neu bei Musterfirma, nur solange der Vorrat reicht", "werbung", "", ("unklar", "")),
-    ("la", "werbung", "m", ("ohne_sprache", "")),
+@pytest.mark.parametrize("text,art,modell,erwartet,urteil", [
+    ("Jetzt neu bei Musterfirma, nur solange der Vorrat reicht", "werbung", "m", ("werbung", "Musterfirma"), "bestaetigt"),
+    ("Sie hören den besten Mix für das ganze Land", "sender", "m", ("sender", ""), "offen"),
+    ("Jetzt neu bei Musterfirma, nur solange der Vorrat reicht", "werbung", "", ("unklar", ""), "offen"),
+    ("la", "werbung", "m", ("ohne_sprache", ""), "offen"),
 ])
-async def test_einordnung(tmp_path, text, art, modell, erwartet):
+async def test_einordnung(tmp_path, text, art, modell, erwartet, urteil):
     b, kennung = buch(tmp_path)
     anfragen: list[httpx.Request] = []
     e = Einstellungen(leitstelle=Leitstelle(schluessel="probe", modell=modell))
@@ -48,7 +48,8 @@ async def test_einordnung(tmp_path, text, art, modell, erwartet):
     await a.rechnen(a.faellig())
     assert a.faellig() == [], "jedes Stück nur einmal"
     s = b.eine(kennung)
-    assert (s.einschaetzung, s.werbender) == erwartet and s.text == text and s.urteil == "offen"
+    assert (s.einschaetzung, s.werbender) == erwartet and s.text == text
+    assert (s.urteil, s.beurteilt_von) == (urteil, "selbst" if urteil == "bestaetigt" else ""), "nur ein sicherer Fund gibt sich selbst frei"
     assert all(r.headers["x-leitstelle-prioritaet"] == "hintergrund" and r.headers["x-leitstelle-art"] == "masse" for r in anfragen)
     assert len({r.headers["x-leitstelle-arbeit"] for r in anfragen}) == 1
 

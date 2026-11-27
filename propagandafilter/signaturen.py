@@ -4,6 +4,9 @@ angekündigten Spots (Sendedaten), aus dem Schnitt und aus dem Lernlauf.
 Jede Signatur ist eine kurze Tondatei im Datenordner und eine Zeile in signaturen.db. Ein Mensch kann sie anhören und
 bestätigen oder verwerfen (Irrtümer herausfiltern); verworfene bleiben mit ihrem Urteil stehen, damit derselbe Irrtum
 nicht wieder als neu erscheint. Gelöscht wird hier nichts.
+
+Eine offene Signatur kann der Filter auch selbst bestätigen, wenn die Einordnung sicher ist (Regel der Freigabe, `sicherer_fund`,
+einstellbar unter `[freigabe]`). Wer geurteilt hat, steht in `beurteilt_von`.
 """
 
 from __future__ import annotations
@@ -19,13 +22,14 @@ from typing import Literal
 import numpy as np
 from pydantic import BaseModel
 
-from .einstellungen import Wiedererkennen
+from .einstellungen import Freigabe, Wiedererkennen
 from .fingerabdruck import RATE, Verzeichnis, abdruecke
 from .klang import KlangFehler, dekodieren
 
 Urteil = Literal["offen", "bestaetigt", "verworfen"]
 Stand = Literal["wirkt", "vorschlag"]
 Fach = Literal["pruefen", "wirkt", "verworfen"]
+Beurteiler = Literal["", "mensch", "selbst"]       # leer, solange die Signatur offen ist
 
 #: aus diesen Herkünften wirkt eine Signatur in ihrer eigenen Quelle, auch bevor ein Mensch sie bestätigt
 SOFORT = frozenset({"vergleich", "angabe", "schnitt"})
@@ -68,6 +72,10 @@ create table signatur_quellen (
 );
 create index signatur_quellen_quelle on signatur_quellen(quelle);
 """,
+    """
+alter table signaturen add column beurteilt_von text not null default '';   -- 'mensch' oder 'selbst' (Regel der Freigabe)
+update signaturen set beurteilt_von = 'mensch' where urteil != 'offen';     -- bis hierher urteilte nur der Mensch
+""",
 ]
 
 #: in welchem Fach der Durchsicht eine Signatur liegt: verworfen; zu prüfen (Vorschlag des Lernlaufs oder bekannt, aber an einer
@@ -107,6 +115,7 @@ class Signatur(BaseModel):
     angelegt: str
     urteil: Urteil
     beurteilt: str | None
+    beurteilt_von: Beurteiler = ""
     werbender: str = ""
     text: str = ""
     einschaetzung: str = ""
@@ -115,6 +124,13 @@ class Signatur(BaseModel):
 
 class SignaturFehler(Exception):
     pass
+
+
+def sicherer_fund(s: Signatur, regel: Freigabe) -> bool:
+    """Regel der Freigabe (RAD-154), die einzige Stelle dafür: eine offene Signatur gilt ohne Menschen als bestätigt, wenn die
+    Einordnung sie Werbung nennt und den Werbenden erkannt hat. Alles andere bleibt Vorschlag; verworfene bleiben verworfen."""
+    return (regel.selbst_bei_sicherem_fund and s.urteil == "offen" and s.herkunft in regel.herkuenfte
+            and s.einschaetzung == "werbung" and bool(s.werbender.strip()))
 
 
 def _packen(h: np.ndarray, t: np.ndarray) -> bytes:
@@ -278,11 +294,29 @@ class Signaturbuch:
             raise KeyError(kennung)
         return self.ton / zeile["datei"]
 
-    def beurteilen(self, kennung: str, urteil: Urteil) -> Signatur:
+    def beurteilen(self, kennung: str, urteil: Urteil, von: Beurteiler = "mensch") -> Signatur:
         self.eine(kennung)
-        self._db.execute("update signaturen set urteil = ?, beurteilt = ? where id = ?",
-                         (urteil, None if urteil == "offen" else _jetzt(), kennung))
+        offen = urteil == "offen"
+        self._db.execute("update signaturen set urteil = ?, beurteilt = ?, beurteilt_von = ? where id = ?",
+                         (urteil, None if offen else _jetzt(), "" if offen else von, kennung))
         if urteil == "bestaetigt":                      # bestätigt heißt: in den Quellen, in denen sie schon auffiel, wirkt sie
             self._db.execute("update signatur_quellen set stand = 'wirkt' where signatur = ?", (kennung,))
         self._verzeichnis = None
         return self.eine(kennung)
+
+    def selbst_freigeben(self, kennung: str, regel: Freigabe) -> bool:
+        """Nach der Einordnung: ist der Fund sicher, gilt die Signatur als bestätigt (wie von einem Menschen, mit `beurteilt_von`
+        selbst). Liefert, ob sie freigegeben wurde."""
+        if not sicherer_fund(self.eine(kennung), regel):
+            return False
+        self.beurteilen(kennung, "bestaetigt", von="selbst")
+        return True
+
+    def nachbewerten(self, regel: Freigabe, *, anwenden: bool) -> list[Signatur]:
+        """Die Regel der Freigabe auf alle offenen Signaturen anwenden, einmalig für die, die vor ihr eingeordnet wurden. Ohne
+        `anwenden` nur die Vorschau: welche freigegeben würden."""
+        sichere = [s for s in self.liste("offen", grenze=-1) if sicherer_fund(s, regel)]     # limit -1: alle
+        if anwenden:
+            for s in sichere:
+                self.selbst_freigeben(s.id, regel)
+        return sichere
